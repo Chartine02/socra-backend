@@ -18,7 +18,6 @@ async function register({ email, password, fullName, university }) {
   }
 
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  const emailVerifyToken = crypto.randomBytes(32).toString("hex");
 
   const user = await prisma.user.create({
     data: {
@@ -26,7 +25,7 @@ async function register({ email, password, fullName, university }) {
       passwordHash,
       fullName,
       university,
-      emailVerifyToken,
+      isEmailVerified: true,
     },
     select: {
       id: true,
@@ -38,18 +37,13 @@ async function register({ email, password, fullName, university }) {
     },
   });
 
-  // TODO: Send verification email with emailVerifyToken
-  return { user, emailVerifyToken };
+  return { user };
 }
 
 async function login({ email, password }) {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || !user.passwordHash) {
     throw createAppError("Invalid email or password", 401);
-  }
-
-  if (!user.isEmailVerified) {
-    throw createAppError("Please verify your email before logging in", 401);
   }
 
   const valid = await bcrypt.compare(password, user.passwordHash);
