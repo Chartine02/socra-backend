@@ -1,0 +1,209 @@
+import json
+import anthropic
+from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+BLOOM_LEVELS = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYSE", "EVALUATE", "CREATE"]
+
+
+def get_next_bloom_level(current: str) -> str:
+    idx = BLOOM_LEVELS.index(current) if current in BLOOM_LEVELS else 0
+    next_idx = min(idx + 1, len(BLOOM_LEVELS) - 1)
+    return BLOOM_LEVELS[next_idx]
+
+
+def extract_knowledge_units(text: str, file_name: str) -> list[dict]:
+    prompt = f"""You are an educational AI that extracts knowledge units from academic documents.
+
+Analyze the following document content and extract distinct knowledge units. Each knowledge unit should represent a specific concept that can be studied and assessed.
+
+For each knowledge unit, provide:
+- topic: The high-level topic (e.g., "Photosynthesis", "Machine Learning")
+- concept: The specific concept within that topic (e.g., "Light-dependent reactions")
+- sourceExcerpt: A relevant excerpt from the text (50-150 words)
+- bloomLevel: The Bloom's taxonomy level most appropriate for this concept. Must be one of: REMEMBER, UNDERSTAND, APPLY, ANALYSE, EVALUATE, CREATE
+
+Document: {file_name}
+
+Content:
+{text[:15000]}
+
+Return your response as a JSON array of objects with keys: topic, concept, sourceExcerpt, bloomLevel.
+Return ONLY the JSON array, no other text."""
+
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    content = response.content[0].text.strip()
+    # Handle potential markdown code blocks
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+
+    return json.loads(content)
+
+
+def generate_socratic_question(knowledge_units: list[dict], bloom_level: str = "REMEMBER") -> dict:
+    topics = ", ".join(set(ku.get("topic", "") for ku in knowledge_units[:5]))
+    excerpts = "\n".join(ku.get("sourceExcerpt", "")[:200] for ku in knowledge_units[:5])
+
+    prompt = f"""You are a Socratic tutor. Generate ONE thought-provoking question at the {bloom_level} level of Bloom's taxonomy.
+
+Topics covered: {topics}
+
+Source material:
+{excerpts}
+
+The question should:
+- Be at the {bloom_level} level of Bloom's taxonomy
+- Encourage the student to think deeply
+- Be answerable from the source material
+- Not be a simple yes/no question
+
+Return ONLY a JSON object with keys: "question" (string), "bloomLevel" (string: {bloom_level})
+No other text."""
+
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    content = response.content[0].text.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+
+    return json.loads(content)
+
+
+def generate_socratic_response(
+    student_response: str,
+    conversation_history: list[dict],
+    current_bloom_level: str,
+) -> dict:
+    history_text = "\n".join(
+        f"{turn['role'].upper()}: {turn['content']}" for turn in conversation_history[-10:]
+    )
+
+    next_bloom = get_next_bloom_level(current_bloom_level)
+
+    prompt = f"""You are a Socratic tutor engaging in dialogue with a student. Your goal is to guide them to deeper understanding through questions, not give answers directly.
+
+Conversation so far:
+{history_text}
+
+Student's latest response: {student_response}
+
+Current Bloom's level: {current_bloom_level}
+
+Instructions:
+- Acknowledge what the student got right
+- If their answer shows understanding, move to the next Bloom's level ({next_bloom})
+- If their answer is incomplete or incorrect, ask a simpler guiding question at the same level
+- Never give the answer directly — guide them with questions
+- If the student has demonstrated understanding at EVALUATE or CREATE level, you may end the session
+
+Return ONLY a JSON object with keys:
+- "response" (string): your Socratic response/question
+- "bloomLevel" (string): the Bloom's level of your response (one of: REMEMBER, UNDERSTAND, APPLY, ANALYSE, EVALUATE, CREATE)
+- "isSessionComplete" (boolean): true only if student has demonstrated mastery at high Bloom's levels
+No other text."""
+
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=800,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    content = response.content[0].text.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+
+    return json.loads(content)
+
+
+def generate_quiz_questions(knowledge_units: list[dict], count: int = 10) -> list[dict]:
+    units_text = "\n\n".join(
+        f"[ID: {ku.get('id', 'unknown')}] Topic: {ku.get('topic', '')} | Concept: {ku.get('concept', '')}\nExcerpt: {ku.get('sourceExcerpt', '')[:300]}"
+        for ku in knowledge_units[:20]
+    )
+
+    prompt = f"""You are an educational assessment AI. Generate exactly {count} multiple-choice questions based on the following knowledge units.
+
+Knowledge Units:
+{units_text}
+
+For each question, provide:
+- knowledgeUnitId: the ID of the knowledge unit this question tests
+- questionText: a clear, unambiguous question
+- options: exactly 4 answer choices (array of strings)
+- correctIndex: index (0-3) of the correct option
+- bloomLevel: the Bloom's taxonomy level (REMEMBER, UNDERSTAND, APPLY, ANALYSE, EVALUATE, CREATE)
+- explanation: why the correct answer is right (shown after answering)
+- sourceExcerpt: relevant excerpt from the source material
+
+Guidelines:
+- Vary Bloom's levels across questions
+- Make distractors plausible but clearly wrong
+- Ensure questions are directly answerable from the source material
+- Each question should test a different aspect
+
+Return ONLY a JSON array of {count} question objects. No other text."""
+
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=8000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    content = response.content[0].text.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+
+    return json.loads(content)
+
+
+def generate_flashcards(knowledge_units: list[dict]) -> list[dict]:
+    units_text = "\n\n".join(
+        f"[ID: {ku.get('id', 'unknown')}] Topic: {ku.get('topic', '')} | Concept: {ku.get('concept', '')}\nExcerpt: {ku.get('sourceExcerpt', '')[:300]}"
+        for ku in knowledge_units[:30]
+    )
+
+    prompt = f"""You are an educational AI creating flashcards for spaced repetition study.
+
+Knowledge Units:
+{units_text}
+
+For each knowledge unit, create ONE flashcard with:
+- knowledgeUnitId: the ID of the knowledge unit
+- front: a question, term, or prompt (concise)
+- back: the answer, definition, or explanation (concise but complete)
+- sourceExcerpt: relevant excerpt that supports the answer
+
+Guidelines:
+- Front should be a clear question or prompt
+- Back should be a concise, complete answer
+- Cards should be atomic (test one thing)
+- Use the source material as the basis for accuracy
+
+Return ONLY a JSON array of flashcard objects. No other text."""
+
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=6000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    content = response.content[0].text.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+
+    return json.loads(content)
