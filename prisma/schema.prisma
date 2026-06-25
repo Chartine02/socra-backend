@@ -7,25 +7,233 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum University {
-  AFRICAN_LEADERSHIP_UNIVERSITY
-  UNIVERSITY_OF_RWANDA
-  ADVENTIST_UNIVERSITY_OF_CENTRAL_AFRICA
-  INES_RUHENGERI
-  KIGALI_INDEPENDENT_UNIVERSITY
-  RWANDA_POLYTECHNIC
-  CARNEGIE_MELLON_UNIVERSITY_AFRICA
-  OTHER
+// ─── ENUMS ────────────────────────────────────────────────────────────────
+
+enum StudyMode {
+  SOCRATIC
+  QUIZ
+  FLASHCARD
 }
 
+enum BloomLevel {
+  REMEMBER
+  UNDERSTAND
+  APPLY
+  ANALYSE
+  EVALUATE
+  CREATE
+}
+
+enum MasteryState {
+  MASTERED
+  SHAKY
+  FORGOTTEN
+}
+
+enum ConfidenceRating {
+  GUESSING
+  UNSURE
+  CONFIDENT
+}
+
+enum SelfRating {
+  FORGOT
+  HARD
+  GOOD
+  EASY
+}
+
+enum ProcessingStatus {
+  PROCESSING
+  READY
+  ERROR
+}
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+}
+
+// ─── MODELS ───────────────────────────────────────────────────────────────
+
 model User {
-  id               String      @id @default(uuid())
-  email            String      @unique
-  password         String
-  fullName         String
-  university       University
-  resetToken       String?
-  resetTokenExpiry DateTime?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  id                String          @id @default(uuid())
+  email             String          @unique
+  passwordHash      String?
+  fullName          String
+  university        String
+  role              UserRole        @default(STUDENT)
+  isEmailVerified   Boolean         @default(false)
+  emailVerifyToken  String?
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  canvasUserId      String?
+  canvasCourseId    String?
+  studyStreak       Int             @default(0)
+  lastStudiedAt     DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  documents         Document[]
+  studySessions     StudySession[]
+  flashcards        Flashcard[]
+  quizResponses     QuizResponse[]
+  dialogueTurns     DialogueTurn[]
+
+  @@map("users")
+}
+
+model Document {
+  id               String            @id @default(uuid())
+  userId           String
+  fileName         String
+  fileSize         Int
+  mimeType         String
+  storageKey       String
+  processingStatus ProcessingStatus  @default(PROCESSING)
+  processingError  String?
+  overallMastery   Float             @default(0)
+  lastStudiedAt    DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeUnits   KnowledgeUnit[]
+  studySessions    StudySession[]
+  flashcards       Flashcard[]
+  quizQuestions    QuizQuestion[]
+
+  @@map("documents")
+}
+
+model KnowledgeUnit {
+  id                String        @id @default(uuid())
+  documentId        String
+  topic             String
+  concept           String
+  sourceExcerpt     String
+  bloomLevel        BloomLevel    @default(REMEMBER)
+  masteryState      MasteryState  @default(FORGOTTEN)
+  masteryPercentage Float         @default(0)
+  lastReviewedAt    DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  document          Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  flashcards        Flashcard[]
+  quizQuestions     QuizQuestion[]
+
+  @@map("knowledge_units")
+}
+
+model StudySession {
+  id              String        @id @default(uuid())
+  userId          String
+  documentId      String
+  mode            StudyMode
+  startedAt       DateTime      @default(now())
+  endedAt         DateTime?
+  itemsCompleted  Int           @default(0)
+  finalBloomLevel BloomLevel?
+  scorePercent    Float?
+  createdAt       DateTime      @default(now())
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document        Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  quizResponses   QuizResponse[]
+  dialogueTurns   DialogueTurn[]
+
+  @@map("study_sessions")
+}
+
+model QuizQuestion {
+  id              String            @id @default(uuid())
+  documentId      String
+  knowledgeUnitId String
+  questionText    String
+  options         Json
+  correctIndex    Int
+  bloomLevel      BloomLevel
+  explanation     String
+  sourceExcerpt   String
+  createdAt       DateTime          @default(now())
+
+  document        Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  knowledgeUnit   KnowledgeUnit     @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
+  responses       QuizResponse[]
+
+  @@map("quiz_questions")
+}
+
+model QuizResponse {
+  id               String           @id @default(uuid())
+  userId           String
+  sessionId        String
+  questionId       String
+  selectedIndex    Int
+  isCorrect        Boolean
+  confidenceRating ConfidenceRating
+  timeTakenSeconds Int?
+  createdAt        DateTime         @default(now())
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session          StudySession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question         QuizQuestion     @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@map("quiz_responses")
+}
+
+model Flashcard {
+  id              String       @id @default(uuid())
+  userId          String
+  documentId      String
+  knowledgeUnitId String
+  front           String
+  back            String
+  sourceExcerpt   String
+  interval        Int          @default(1)
+  easeFactor      Float        @default(2.5)
+  repetitions     Int          @default(0)
+  nextReviewAt    DateTime     @default(now())
+  masteryState    MasteryState @default(FORGOTTEN)
+  lastRating      SelfRating?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document        Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  knowledgeUnit   KnowledgeUnit @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
+  reviewHistory   FlashcardReview[]
+
+  @@map("flashcards")
+}
+
+model FlashcardReview {
+  id           String     @id @default(uuid())
+  flashcardId  String
+  rating       SelfRating
+  previousInterval    Int
+  newInterval         Int
+  previousEaseFactor  Float
+  newEaseFactor       Float
+  reviewedAt   DateTime   @default(now())
+
+  flashcard    Flashcard  @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+
+  @@map("flashcard_reviews")
+}
+
+model DialogueTurn {
+  id          String     @id @default(uuid())
+  userId      String
+  sessionId   String
+  role        String
+  content     String
+  bloomLevel  BloomLevel
+  createdAt   DateTime   @default(now())
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session     StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("dialogue_turns")
 }
