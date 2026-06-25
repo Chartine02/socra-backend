@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum University {
+  AFRICAN_LEADERSHIP_UNIVERSITY
+  UNIVERSITY_OF_RWANDA
+  ADVENTIST_UNIVERSITY_OF_CENTRAL_AFRICA
+  INES_RUHENGERI
+  KIGALI_INDEPENDENT_UNIVERSITY
+  RWANDA_POLYTECHNIC
+  CARNEGIE_MELLON_UNIVERSITY_AFRICA
+  OTHER
+}
+
+model User {
+  id               String      @id @default(uuid())
+  email            String      @unique
+  password         String
+  fullName         String
+  university       University
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
