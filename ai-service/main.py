@@ -16,7 +16,7 @@ from schemas import (
     FlashcardGenerateRequest,
     FlashcardOutput,
 )
-from claude_service import (
+from llm_service import (
     extract_knowledge_units,
     generate_socratic_question,
     generate_socratic_response,

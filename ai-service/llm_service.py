@@ -1,8 +1,13 @@
 import json
-import anthropic
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from google import genai
+from groq import Groq
+from config import GEMINI_API_KEY, GEMINI_MODEL, GROQ_API_KEY, GROQ_MODEL
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+# Configure Gemini
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+# Configure Groq
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 BLOOM_LEVELS = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYSE", "EVALUATE", "CREATE"]
 
@@ -11,6 +16,49 @@ def get_next_bloom_level(current: str) -> str:
     idx = BLOOM_LEVELS.index(current) if current in BLOOM_LEVELS else 0
     next_idx = min(idx + 1, len(BLOOM_LEVELS) - 1)
     return BLOOM_LEVELS[next_idx]
+
+
+def _parse_json_response(content: str):
+    """Parse JSON from LLM response, handling markdown code blocks."""
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+    return json.loads(content)
+
+
+def _call_llm(prompt: str, max_tokens: int = 4096) -> str:
+    """Call Gemini as primary, fall back to Groq on failure."""
+    # Try Gemini first
+    if gemini_client:
+        try:
+            response = gemini_client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "max_output_tokens": max_tokens,
+                    "temperature": 0.7,
+                },
+            )
+            return response.text
+        except Exception as e:
+            print(f"[Gemini failed] {e}, falling back to Groq...")
+
+    # Fallback to Groq
+    if groq_client:
+        try:
+            response = groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=0.7,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"[Groq failed] {e}")
+            raise RuntimeError("Both Gemini and Groq failed")
+
+    raise RuntimeError("No LLM provider configured. Set GEMINI_API_KEY or GROQ_API_KEY.")
 
 
 def extract_knowledge_units(text: str, file_name: str) -> list[dict]:
@@ -32,19 +80,8 @@ Content:
 Return your response as a JSON array of objects with keys: topic, concept, sourceExcerpt, bloomLevel.
 Return ONLY the JSON array, no other text."""
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    content = response.content[0].text.strip()
-    # Handle potential markdown code blocks
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1]
-        content = content.rsplit("```", 1)[0]
-
-    return json.loads(content)
+    content = _call_llm(prompt, max_tokens=4096)
+    return _parse_json_response(content)
 
 
 def generate_socratic_question(knowledge_units: list[dict], bloom_level: str = "REMEMBER") -> dict:
@@ -67,18 +104,8 @@ The question should:
 Return ONLY a JSON object with keys: "question" (string), "bloomLevel" (string: {bloom_level})
 No other text."""
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    content = response.content[0].text.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1]
-        content = content.rsplit("```", 1)[0]
-
-    return json.loads(content)
+    content = _call_llm(prompt, max_tokens=500)
+    return _parse_json_response(content)
 
 
 def generate_socratic_response(
@@ -114,18 +141,8 @@ Return ONLY a JSON object with keys:
 - "isSessionComplete" (boolean): true only if student has demonstrated mastery at high Bloom's levels
 No other text."""
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    content = response.content[0].text.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1]
-        content = content.rsplit("```", 1)[0]
-
-    return json.loads(content)
+    content = _call_llm(prompt, max_tokens=800)
+    return _parse_json_response(content)
 
 
 def generate_quiz_questions(knowledge_units: list[dict], count: int = 10) -> list[dict]:
@@ -156,18 +173,8 @@ Guidelines:
 
 Return ONLY a JSON array of {count} question objects. No other text."""
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=8000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    content = response.content[0].text.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1]
-        content = content.rsplit("```", 1)[0]
-
-    return json.loads(content)
+    content = _call_llm(prompt, max_tokens=8000)
+    return _parse_json_response(content)
 
 
 def generate_flashcards(knowledge_units: list[dict]) -> list[dict]:
@@ -195,15 +202,5 @@ Guidelines:
 
 Return ONLY a JSON array of flashcard objects. No other text."""
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=6000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    content = response.content[0].text.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1]
-        content = content.rsplit("```", 1)[0]
-
-    return json.loads(content)
+    content = _call_llm(prompt, max_tokens=6000)
+    return _parse_json_response(content)

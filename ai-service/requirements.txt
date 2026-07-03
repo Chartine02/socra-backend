@@ -1,4 +1,5 @@
-anthropic
+google-genai
+groq
 fastapi
 uvicorn[standard]
 python-multipart

@@ -1,5 +1,57 @@
-/node_modules
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+.next/
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Env files (never commit secrets)
 .env
-/generated
-/uploads
-/generated/prisma
+.env.local
+.env.*.local
+!.env.example
+
+# Python (worker)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.uv_cache/
+
+# Supabase local
+infra/supabase/.branches/
+infra/supabase/.temp/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# Test / coverage
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Misc
+*.tgz
+.cache/
