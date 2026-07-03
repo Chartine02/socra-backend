@@ -1,4 +1,6 @@
 import os
+import io
+import httpx
 import PyPDF2
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,27 +46,16 @@ def verify_api_key(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def read_file_content(storage_path: str) -> str:
-    """Read text content from a PDF or plain text file."""
-    # Resolve path relative to the backend's root
-    backend_root = os.path.join(os.path.dirname(__file__), "..")
-    full_path = os.path.join(backend_root, storage_path)
+def read_file_content(file_url: str, file_name: str) -> str:
+    """Download and read text content from a PDF or plain text file via URL."""
+    response = httpx.get(file_url, timeout=60)
+    response.raise_for_status()
 
-    if not os.path.exists(full_path):
-        raise HTTPException(status_code=404, detail=f"File not found: {storage_path}")
+    if file_name.lower().endswith(".pdf"):
+        reader = PyPDF2.PdfReader(io.BytesIO(response.content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-    if full_path.lower().endswith(".pdf"):
-        text = ""
-        with open(full_path, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        return text
-    else:
-        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-            return f.read()
+    return response.text
 
 
 @app.get("/health")
@@ -74,7 +65,7 @@ def health():
 
 @app.post("/process-document", response_model=ProcessDocumentResponse)
 def process_document(req: ProcessDocumentRequest, _=Depends(verify_api_key)):
-    text = read_file_content(req.storagePath)
+    text = read_file_content(req.fileUrl, req.fileName)
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Document appears to be empty")

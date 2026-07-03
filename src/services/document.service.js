@@ -1,5 +1,8 @@
 const prisma = require("../lib/prisma");
+const { supabase, BUCKET } = require("../lib/supabase");
 const aiService = require("./ai.service");
+const path = require("path");
+const { v4: uuidv4 } = require("uuid");
 
 function createAppError(message, statusCode) {
   const err = new Error(message);
@@ -8,26 +11,53 @@ function createAppError(message, statusCode) {
 }
 
 async function uploadDocument({ userId, file }) {
+  // Upload file buffer to Supabase Storage
+  const ext = path.extname(file.originalname);
+  const storageKey = `${userId}/${uuidv4()}${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(BUCKET)
+    .upload(storageKey, file.buffer, {
+      contentType: file.mimetype,
+    });
+
+  if (uploadError) {
+    throw createAppError(`Storage upload failed: ${uploadError.message}`, 500);
+  }
+
   const document = await prisma.document.create({
     data: {
       userId,
       fileName: file.originalname,
       fileSize: file.size,
       mimeType: file.mimetype,
-      storageKey: file.path || file.filename,
+      storageKey,
       processingStatus: "PROCESSING",
     },
   });
 
   // Call AI service asynchronously — don't block the response
-  processDocumentAsync(document.id, file.path || file.filename, file.originalname);
+  processDocumentAsync(document.id, storageKey, file.originalname);
 
   return document;
 }
 
-async function processDocumentAsync(documentId, storagePath, fileName) {
+async function processDocumentAsync(documentId, storageKey, fileName) {
   try {
-    const result = await aiService.processDocument({ storagePath, fileName, documentId });
+    // Create a signed URL for the AI service to download the file
+    const { data: signedData, error: signError } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(storageKey, 600); // 10 minutes
+
+    if (signError) {
+      throw new Error(`Failed to create signed URL: ${signError.message}`);
+    }
+
+    const result = await aiService.processDocument({
+      fileUrl: signedData.signedUrl,
+      fileName,
+      documentId,
+    });
 
     if (result.knowledgeUnits && result.knowledgeUnits.length > 0) {
       await prisma.knowledgeUnit.createMany({
@@ -102,6 +132,11 @@ async function deleteDocument(documentId, userId) {
 
   if (!document) {
     throw createAppError("Document not found", 404);
+  }
+
+  // Delete file from Supabase Storage
+  if (document.storageKey) {
+    await supabase.storage.from(BUCKET).remove([document.storageKey]);
   }
 
   await prisma.document.delete({ where: { id: documentId } });

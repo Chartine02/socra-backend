@@ -16,10 +16,10 @@ function createAppError(message, statusCode) {
   return err;
 }
 
-async function processDocument({ storagePath, fileName, documentId }) {
+async function processDocument({ fileUrl, fileName, documentId }) {
   try {
     const response = await aiClient.post("/process-document", {
-      storagePath,
+      fileUrl,
       fileName,
       documentId,
     });

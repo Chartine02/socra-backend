@@ -11,7 +11,7 @@ class KnowledgeUnitInput(BaseModel):
 
 
 class ProcessDocumentRequest(BaseModel):
-    storagePath: str
+    fileUrl: str
     fileName: str
     documentId: str
 

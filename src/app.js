@@ -7,9 +7,13 @@ const { error } = require("./utils/response.utils");
 
 const app = express();
 
-// Middleware stack
+// CORS — env-driven origins
+const allowedOrigins = (process.env.FRONTEND_URL || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim());
+
 app.use(cors({
-  origin: ["http://localhost:5173"],
+  origin: allowedOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
