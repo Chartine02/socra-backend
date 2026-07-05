@@ -7,7 +7,7 @@ const aiClient = axios.create({
     Authorization: `Bearer ${process.env.AI_SERVICE_API_KEY}`,
     "Content-Type": "application/json",
   },
-  timeout: 120000, // 2 min for AI processing
+  timeout: 180000, // 3 min for AI processing (accounts for cold start)
 });
 
 function createAppError(message, statusCode) {
@@ -16,8 +16,18 @@ function createAppError(message, statusCode) {
   return err;
 }
 
+async function wakeUpService() {
+  try {
+    await axios.get(`${process.env.AI_SERVICE_URL}/health`, { timeout: 60000 });
+    logger.info("AI service is awake");
+  } catch (err) {
+    logger.warn("AI service wake-up ping failed", { error: err.message });
+  }
+}
+
 async function processDocument({ fileUrl, fileName, documentId }) {
   try {
+    await wakeUpService();
     const response = await aiClient.post("/process-document", {
       fileUrl,
       fileName,
@@ -32,6 +42,7 @@ async function processDocument({ fileUrl, fileName, documentId }) {
 
 async function startSocraticSession({ documentId, knowledgeUnits }) {
   try {
+    await wakeUpService();
     const response = await aiClient.post("/socratic/start", {
       documentId,
       knowledgeUnits,
@@ -45,6 +56,7 @@ async function startSocraticSession({ documentId, knowledgeUnits }) {
 
 async function respondSocratic({ sessionId, studentResponse, conversationHistory, currentBloomLevel }) {
   try {
+    await wakeUpService();
     const response = await aiClient.post("/socratic/respond", {
       sessionId,
       studentResponse,
@@ -60,6 +72,7 @@ async function respondSocratic({ sessionId, studentResponse, conversationHistory
 
 async function generateQuizQuestions({ documentId, knowledgeUnits, count }) {
   try {
+    await wakeUpService();
     const response = await aiClient.post("/quiz/generate", {
       documentId,
       knowledgeUnits,
@@ -74,6 +87,7 @@ async function generateQuizQuestions({ documentId, knowledgeUnits, count }) {
 
 async function generateFlashcards({ knowledgeUnits }) {
   try {
+    await wakeUpService();
     const response = await aiClient.post("/flashcard/generate", {
       knowledgeUnits,
     });
