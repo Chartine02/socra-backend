@@ -16,7 +16,7 @@ function createAppError(message, statusCode) {
   return err;
 }
 
-async function callWithRetry(method, url, data, retries = 3) {
+async function callWithRetry(method, url, data, retries = 4) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const response = await aiClient[method](url, data);
@@ -24,8 +24,9 @@ async function callWithRetry(method, url, data, retries = 3) {
     } catch (err) {
       const status = err.response?.status;
       if (status === 502 && attempt < retries) {
-        logger.info(`AI service returned 502, retrying in ${attempt * 10}s (attempt ${attempt}/${retries})`);
-        await new Promise((r) => setTimeout(r, attempt * 10000));
+        const waitTime = 20000; // 20s between retries
+        logger.info(`AI service returned 502, retrying in 20s (attempt ${attempt}/${retries})`);
+        await new Promise((r) => setTimeout(r, waitTime));
       } else {
         throw err;
       }
