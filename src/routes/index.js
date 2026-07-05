@@ -11,7 +11,7 @@ const router = Router();
 router.use("/auth", authRoutes);
 router.use("/documents", documentRoutes);
 router.use("/study", studyRoutes);
-router.use("/flashcard", flashcardRoutes);
+router.use("/flashcards", flashcardRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/canvas", canvasRoutes);
 
