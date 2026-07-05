@@ -27,6 +27,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Health check (for external cron to keep service alive)
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+
 // API routes
 app.use("/api", routes);
 
