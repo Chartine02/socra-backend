@@ -16,9 +16,26 @@ function createAppError(message, statusCode) {
   return err;
 }
 
+async function callWithRetry(method, url, data, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await aiClient[method](url, data);
+      return response;
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 502 && attempt < retries) {
+        logger.info(`AI service returned 502, retrying in ${attempt * 10}s (attempt ${attempt}/${retries})`);
+        await new Promise((r) => setTimeout(r, attempt * 10000));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 async function processDocument({ fileUrl, fileName, documentId }) {
   try {
-    const response = await aiClient.post("/process-document", {
+    const response = await callWithRetry("post", "/process-document", {
       fileUrl,
       fileName,
       documentId,
@@ -32,7 +49,7 @@ async function processDocument({ fileUrl, fileName, documentId }) {
 
 async function startSocraticSession({ documentId, knowledgeUnits }) {
   try {
-    const response = await aiClient.post("/socratic/start", {
+    const response = await callWithRetry("post", "/socratic/start", {
       documentId,
       knowledgeUnits,
     });
@@ -45,7 +62,7 @@ async function startSocraticSession({ documentId, knowledgeUnits }) {
 
 async function respondSocratic({ sessionId, studentResponse, conversationHistory, currentBloomLevel }) {
   try {
-    const response = await aiClient.post("/socratic/respond", {
+    const response = await callWithRetry("post", "/socratic/respond", {
       sessionId,
       studentResponse,
       conversationHistory,
@@ -60,7 +77,7 @@ async function respondSocratic({ sessionId, studentResponse, conversationHistory
 
 async function generateQuizQuestions({ documentId, knowledgeUnits, count }) {
   try {
-    const response = await aiClient.post("/quiz/generate", {
+    const response = await callWithRetry("post", "/quiz/generate", {
       documentId,
       knowledgeUnits,
       count,
@@ -74,7 +91,7 @@ async function generateQuizQuestions({ documentId, knowledgeUnits, count }) {
 
 async function generateFlashcards({ knowledgeUnits }) {
   try {
-    const response = await aiClient.post("/flashcard/generate", {
+    const response = await callWithRetry("post", "/flashcard/generate", {
       knowledgeUnits,
     });
     return response.data;
