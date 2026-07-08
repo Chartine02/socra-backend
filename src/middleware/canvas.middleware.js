@@ -1,15 +1,27 @@
 const { error } = require("../utils/response.utils");
 
-// LTI 1.3 launch verification middleware
-// This is a simplified implementation — full ltijs integration
-// requires platform registration done at startup in canvas.service.js
-function verifyLtiLaunch(req, res, next) {
-  // ltijs handles verification internally via its own routes
-  // This middleware validates that the LTI context is present
-  if (!req.body || !req.body.id_token) {
-    return error(res, "Invalid LTI launch", 401);
+// Validate that the user has instructor role (for admin endpoints)
+function requireInstructor(req, res, next) {
+  if (!req.user || req.user.role !== "INSTRUCTOR") {
+    return error(res, "Instructor access required", 403);
   }
   next();
 }
 
-module.exports = { verifyLtiLaunch };
+// Validate Canvas base URL format
+function validateCanvasUrl(req, res, next) {
+  const canvasBaseUrl = req.query.canvasBaseUrl || req.body.canvasBaseUrl;
+  if (canvasBaseUrl) {
+    try {
+      const url = new URL(canvasBaseUrl);
+      if (!url.protocol.startsWith("https")) {
+        return error(res, "Canvas URL must use HTTPS", 400);
+      }
+    } catch {
+      return error(res, "Invalid Canvas URL format", 400);
+    }
+  }
+  next();
+}
+
+module.exports = { requireInstructor, validateCanvasUrl };

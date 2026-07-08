@@ -79,6 +79,8 @@ model User {
   flashcards        Flashcard[]
   quizResponses     QuizResponse[]
   dialogueTurns     DialogueTurn[]
+  canvasTokens      CanvasToken[]
+  canvasCourses     CanvasCourse[]
 
   @@map("users")
 }
@@ -102,6 +104,7 @@ model Document {
   studySessions    StudySession[]
   flashcards       Flashcard[]
   quizQuestions    QuizQuestion[]
+  canvasContentItems CanvasContentItem[]
 
   @@map("documents")
 }
@@ -236,4 +239,89 @@ model DialogueTurn {
   session     StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("dialogue_turns")
+}
+
+// ─── CANVAS / LTI INTEGRATION ─────────────────────────────────────────────
+
+model LtiPlatform {
+  id              String   @id @default(uuid())
+  issuer          String   @unique    // e.g. https://canvas.instructure.com
+  clientId        String               // LTI Developer Key client ID
+  deploymentId    String?
+  authEndpoint    String               // OIDC auth URL
+  tokenEndpoint   String               // OAuth2 token URL
+  jwksEndpoint    String               // Platform JWKS URL for key validation
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("lti_platforms")
+}
+
+model LtiState {
+  id        String   @id @default(uuid())
+  state     String   @unique
+  nonce     String
+  payload   Json?    // stores login_hint, lti_message_hint, etc.
+  consumed  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("lti_states")
+}
+
+model CanvasToken {
+  id            String   @id @default(uuid())
+  userId        String
+  canvasBaseUrl String   // e.g. https://alu.instructure.com
+  accessToken   String   // encrypted
+  refreshToken  String   // encrypted
+  expiresAt     DateTime
+  scopes        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, canvasBaseUrl])
+  @@map("canvas_tokens")
+}
+
+model CanvasCourse {
+  id              String   @id @default(uuid())
+  userId          String
+  canvasCourseId  String
+  canvasBaseUrl   String
+  courseName      String
+  courseCode       String?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentItems    CanvasContentItem[]
+
+  @@unique([userId, canvasCourseId, canvasBaseUrl])
+  @@map("canvas_courses")
+}
+
+model CanvasContentItem {
+  id              String   @id @default(uuid())
+  canvasCourseId  String   // FK to CanvasCourse
+  canvasItemId    String   // Canvas's own ID for the item
+  itemType        String   // "page", "file", "module"
+  title           String
+  contentUrl      String?  // URL to fetch content
+  htmlContent     String?  // For pages: raw HTML body
+  textContent     String?  // Extracted plain text
+  fileSize        Int?
+  lastModifiedAt  DateTime?
+  documentId      String?  // Link to SOCRA Document if processed
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  course          CanvasCourse @relation(fields: [canvasCourseId], references: [id], onDelete: Cascade)
+  document        Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@unique([canvasCourseId, canvasItemId, itemType])
+  @@map("canvas_content_items")
 }

@@ -1,63 +1,18 @@
-const prisma = require("../lib/prisma");
-const { signToken } = require("../utils/jwt.utils");
+// Canvas integration is split into dedicated service modules:
+// - lti.service.js         — LTI 1.3 OIDC login + JWT launch validation
+// - canvas-oauth.service.js — OAuth2 token management
+// - canvas-api.service.js   — Canvas REST API client
+// - canvas-sync.service.js  — Course content sync + AI processing
 
-function createAppError(message, statusCode) {
-  const err = new Error(message);
-  err.statusCode = statusCode;
-  return err;
-}
+// Re-export for backward compatibility
+const ltiService = require("./lti.service");
+const canvasOAuthService = require("./canvas-oauth.service");
+const canvasApiService = require("./canvas-api.service");
+const canvasSyncService = require("./canvas-sync.service");
 
-async function handleLtiLaunch(idtoken) {
-  if (!idtoken || !idtoken.userInfo) {
-    throw createAppError("Invalid LTI launch payload", 401);
-  }
-
-  const { name, email } = idtoken.userInfo;
-  const canvasUserId = idtoken.user;
-  const canvasCourseId = idtoken.platformContext?.context?.id;
-
-  // Determine role from LTI roles
-  const roles = idtoken.platformContext?.roles || [];
-  const isInstructor = roles.some((r) => r.includes("Instructor"));
-  const role = isInstructor ? "INSTRUCTOR" : "STUDENT";
-
-  // Find or create user
-  let user = await prisma.user.findFirst({
-    where: { OR: [{ email }, { canvasUserId }] },
-  });
-
-  if (!user) {
-    user = await prisma.user.create({
-      data: {
-        email: email || `canvas_${canvasUserId}@lti.local`,
-        fullName: name || "Canvas User",
-        university: "African Leadership University (ALU)",
-        role,
-        canvasUserId,
-        canvasCourseId,
-        isEmailVerified: true, // LTI users are pre-verified
-      },
-    });
-  } else {
-    // Update Canvas fields
-    user = await prisma.user.update({
-      where: { id: user.id },
-      data: { canvasUserId, canvasCourseId, role },
-    });
-  }
-
-  const token = signToken({ id: user.id, email: user.email, role: user.role });
-
-  return {
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      university: user.university,
-      role: user.role,
-    },
-  };
-}
-
-module.exports = { handleLtiLaunch };
+module.exports = {
+  ...ltiService,
+  ...canvasOAuthService,
+  ...canvasApiService,
+  ...canvasSyncService,
+};

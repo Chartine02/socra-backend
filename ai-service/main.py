@@ -65,7 +65,13 @@ def health():
 
 @app.post("/process-document", response_model=ProcessDocumentResponse)
 def process_document(req: ProcessDocumentRequest, _=Depends(verify_api_key)):
-    text = read_file_content(req.fileUrl, req.fileName)
+    # Use textContent directly if provided (Canvas pages), otherwise download file
+    if req.textContent and req.textContent.strip():
+        text = req.textContent
+    elif req.fileUrl:
+        text = read_file_content(req.fileUrl, req.fileName)
+    else:
+        raise HTTPException(status_code=400, detail="Either fileUrl or textContent is required")
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Document appears to be empty")

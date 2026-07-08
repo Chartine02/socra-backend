@@ -11,9 +11,10 @@ class KnowledgeUnitInput(BaseModel):
 
 
 class ProcessDocumentRequest(BaseModel):
-    fileUrl: str
+    fileUrl: Optional[str] = None
     fileName: str
     documentId: str
+    textContent: Optional[str] = None
 
 
 class KnowledgeUnitOutput(BaseModel):
