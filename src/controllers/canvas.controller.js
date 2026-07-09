@@ -58,19 +58,40 @@ async function getCourses(req, res, next) {
   }
 }
 
-// Trigger content sync for a course
-async function syncCourse(req, res, next) {
+// List modules for a specific course
+async function getModules(req, res, next) {
   try {
-    const { canvasCourseId } = req.body;
-
+    const { canvasCourseId } = req.query;
     if (!canvasCourseId) {
-      return res.status(400).json({ error: "canvasCourseId is required" });
+      return res.status(400).json({ error: "canvasCourseId query parameter required" });
     }
 
-    const results = await canvasSyncService.syncCourseContent(
+    const modules = await canvasSyncService.getModules(
       req.user.id,
       String(canvasCourseId),
       CANVAS_BASE_URL
+    );
+
+    return success(res, { modules });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Sync selected modules from a course
+async function syncModules(req, res, next) {
+  try {
+    const { canvasCourseId, moduleIds } = req.body;
+
+    if (!canvasCourseId || !moduleIds || !Array.isArray(moduleIds) || moduleIds.length === 0) {
+      return res.status(400).json({ error: "canvasCourseId and moduleIds[] are required" });
+    }
+
+    const results = await canvasSyncService.syncModules(
+      req.user.id,
+      String(canvasCourseId),
+      CANVAS_BASE_URL,
+      moduleIds.map(String)
     );
 
     return success(res, results);
@@ -90,7 +111,7 @@ async function getSyncStatus(req, res, next) {
 
     const status = await canvasSyncService.getSyncStatus(
       req.user.id,
-      canvasCourseId,
+      String(canvasCourseId),
       CANVAS_BASE_URL
     );
 
@@ -105,6 +126,7 @@ module.exports = {
   getTokenStatus,
   removeToken,
   getCourses,
-  syncCourse,
+  getModules,
+  syncModules,
   getSyncStatus,
 };

@@ -69,13 +69,29 @@ async function processDocumentAsync(documentId, storageKey, fileName) {
           bloomLevel: ku.bloomLevel || "REMEMBER",
         })),
       });
-    }
 
-    await prisma.document.update({
-      where: { id: documentId },
-      data: { processingStatus: "READY" },
-    });
+      // Generate study summary from the knowledge units' source excerpts
+      const textForSummary = result.knowledgeUnits
+        .map((ku) => `## ${ku.topic}: ${ku.concept}\n\n${ku.sourceExcerpt}`)
+        .join("\n\n---\n\n");
+
+      const summary = await aiService.generateSummary({
+        textContent: textForSummary,
+        title: fileName,
+      });
+
+      await prisma.document.update({
+        where: { id: documentId },
+        data: { processingStatus: "READY", summary },
+      });
+    } else {
+      await prisma.document.update({
+        where: { id: documentId },
+        data: { processingStatus: "READY" },
+      });
+    }
   } catch (err) {
+    console.error("[processDocumentAsync] FAILED:", err.message, err.stack);
     await prisma.document.update({
       where: { id: documentId },
       data: { processingStatus: "ERROR", processingError: err.message },
@@ -95,6 +111,7 @@ async function getUserDocuments(userId) {
       processingStatus: true,
       overallMastery: true,
       lastStudiedAt: true,
+      summary: true,
       createdAt: true,
     },
   });
@@ -142,4 +159,69 @@ async function deleteDocument(documentId, userId) {
   await prisma.document.delete({ where: { id: documentId } });
 }
 
-module.exports = { uploadDocument, getUserDocuments, getDocumentById, deleteDocument };
+async function reprocessDocument(documentId, userId) {
+  const document = await prisma.document.findFirst({
+    where: { id: documentId, userId, processingStatus: "ERROR" },
+  });
+  if (!document) {
+    throw createAppError("Document not found or not in error state", 404);
+  }
+
+  await prisma.document.update({
+    where: { id: documentId },
+    data: { processingStatus: "PROCESSING", processingError: null },
+  });
+
+  // Check if it's a Canvas document (has canvasContentItem with textContent)
+  const canvasItem = await prisma.canvasContentItem.findFirst({
+    where: { documentId },
+    select: { textContent: true },
+  });
+
+  if (canvasItem?.textContent) {
+    // Canvas document — process with textContent
+    processDocumentWithText(documentId, canvasItem.textContent, document.fileName);
+  } else {
+    // Regular upload — process via signed URL
+    processDocumentAsync(documentId, document.storageKey, document.fileName);
+  }
+
+  return { id: documentId, processingStatus: "PROCESSING" };
+}
+
+async function processDocumentWithText(documentId, textContent, fileName) {
+  try {
+    const result = await aiService.processDocument({
+      fileUrl: null,
+      fileName,
+      documentId,
+      textContent,
+    });
+
+    if (result.knowledgeUnits && result.knowledgeUnits.length > 0) {
+      await prisma.knowledgeUnit.createMany({
+        data: result.knowledgeUnits.map((ku) => ({
+          documentId,
+          topic: ku.topic,
+          concept: ku.concept,
+          sourceExcerpt: ku.sourceExcerpt,
+          bloomLevel: ku.bloomLevel || "REMEMBER",
+        })),
+      });
+    }
+
+    const summary = await aiService.generateSummary({ textContent, title: fileName });
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { processingStatus: "READY", summary },
+    });
+  } catch (err) {
+    console.error("[processDocumentWithText] FAILED:", err.message);
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { processingStatus: "ERROR", processingError: err.message },
+    });
+  }
+}
+
+module.exports = { uploadDocument, getUserDocuments, getDocumentById, deleteDocument, reprocessDocument };

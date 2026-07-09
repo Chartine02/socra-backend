@@ -158,12 +158,18 @@ async function generateQuiz({ sessionId, documentId, count, userId }) {
   });
 
   // Save quiz questions
+  const validKuIds = new Set(document.knowledgeUnits.map((ku) => ku.id));
+  const fallbackKuId = document.knowledgeUnits[0]?.id;
   const questions = [];
   for (const q of result) {
+    const knowledgeUnitId = validKuIds.has(q.knowledgeUnitId)
+      ? q.knowledgeUnitId
+      : fallbackKuId;
+    if (!knowledgeUnitId) continue;
     const question = await prisma.quizQuestion.create({
       data: {
         documentId,
-        knowledgeUnitId: q.knowledgeUnitId,
+        knowledgeUnitId,
         questionText: q.questionText,
         options: q.options,
         correctIndex: q.correctIndex,

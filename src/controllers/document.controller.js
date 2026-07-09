@@ -45,4 +45,13 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { upload, getAll, getOne, remove };
+async function reprocess(req, res, next) {
+  try {
+    const result = await documentService.reprocessDocument(req.params.documentId, req.user.id);
+    return success(res, result, "Document reprocessing started");
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { upload, getAll, getOne, remove, reprocess };

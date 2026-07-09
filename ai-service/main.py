@@ -4,6 +4,7 @@ import httpx
 import PyPDF2
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from config import AI_SERVICE_API_KEY
 from schemas import (
@@ -102,6 +103,8 @@ def socratic_respond(req: SocraticRespondRequest, _=Depends(verify_api_key)):
 def quiz_generate(req: QuizGenerateRequest, _=Depends(verify_api_key)):
     knowledge_units = [ku.model_dump() for ku in req.knowledgeUnits]
     questions = generate_quiz_questions(knowledge_units, req.count)
+    for q in questions:
+        q["knowledgeUnitId"] = str(q.get("knowledgeUnitId", ""))
     return questions
 
 
@@ -109,7 +112,25 @@ def quiz_generate(req: QuizGenerateRequest, _=Depends(verify_api_key)):
 def flashcard_generate(req: FlashcardGenerateRequest, _=Depends(verify_api_key)):
     knowledge_units = [ku.model_dump() for ku in req.knowledgeUnits]
     cards = generate_flashcards(knowledge_units)
+    for c in cards:
+        c["knowledgeUnitId"] = str(c.get("knowledgeUnitId", ""))
     return cards
+
+
+class SummarizeRequest(BaseModel):
+    textContent: str
+    title: str
+
+
+class SummarizeResponse(BaseModel):
+    summary: str
+
+
+@app.post("/summarize", response_model=SummarizeResponse)
+def summarize(req: SummarizeRequest, _=Depends(verify_api_key)):
+    from llm_service import generate_study_summary
+    summary = generate_study_summary(req.textContent, req.title)
+    return {"summary": summary}
 
 
 if __name__ == "__main__":

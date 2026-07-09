@@ -2,7 +2,6 @@ const prisma = require("../lib/prisma");
 const canvasApi = require("./canvas-api.service");
 const aiService = require("./ai.service");
 const logger = require("../utils/logger");
-const { v4: uuidv4 } = require("uuid");
 
 function createAppError(message, statusCode) {
   const err = new Error(message);
@@ -28,22 +27,29 @@ function stripHtml(html) {
     .trim();
 }
 
-// ─── Sync Course Content ──────────────────────────────────────────────────
+// ─── List modules for a course ────────────────────────────────────────────
 
-async function syncCourseContent(userId, canvasCourseId, canvasBaseUrl) {
+async function getModules(userId, canvasCourseId, canvasBaseUrl) {
+  const modules = await canvasApi.getModules(userId, canvasBaseUrl, canvasCourseId);
+  return modules.map((m) => ({
+    id: m.id,
+    name: m.name,
+    position: m.position,
+    itemsCount: m.items_count || (m.items ? m.items.length : 0),
+  }));
+}
+
+// ─── Sync selected modules ───────────────────────────────────────────────
+
+async function syncModules(userId, canvasCourseId, canvasBaseUrl, moduleIds) {
   // Find or create the CanvasCourse record
   let course = await prisma.canvasCourse.findUnique({
     where: {
-      userId_canvasCourseId_canvasBaseUrl: {
-        userId,
-        canvasCourseId,
-        canvasBaseUrl,
-      },
+      userId_canvasCourseId_canvasBaseUrl: { userId, canvasCourseId, canvasBaseUrl },
     },
   });
 
   if (!course) {
-    // Fetch course info from Canvas and create the record
     let courseName = "Canvas Course";
     let courseCode = null;
     try {
@@ -51,50 +57,24 @@ async function syncCourseContent(userId, canvasCourseId, canvasBaseUrl) {
       courseName = courseData.name || courseName;
       courseCode = courseData.course_code || null;
     } catch (err) {
-      // Continue with defaults if course fetch fails
+      // Continue with defaults
     }
 
     course = await prisma.canvasCourse.create({
-      data: {
-        userId,
-        canvasCourseId,
-        canvasBaseUrl,
-        courseName,
-        courseCode,
-      },
+      data: { userId, canvasCourseId, canvasBaseUrl, courseName, courseCode },
     });
   }
 
-  const results = { pages: 0, files: 0, errors: [] };
+  const results = { modules: 0, documents: 0, errors: [] };
 
-  // Sync pages
-  try {
-    const pages = await canvasApi.getPages(userId, canvasBaseUrl, canvasCourseId);
-    for (const page of pages) {
-      try {
-        await syncPage(userId, course.id, canvasBaseUrl, canvasCourseId, page);
-        results.pages++;
-      } catch (err) {
-        results.errors.push(`Page "${page.title}": ${err.message}`);
-      }
+  for (const moduleId of moduleIds) {
+    try {
+      await syncSingleModule(userId, course, canvasBaseUrl, canvasCourseId, moduleId);
+      results.modules++;
+      results.documents++;
+    } catch (err) {
+      results.errors.push(`Module ${moduleId}: ${err.message}`);
     }
-  } catch (err) {
-    results.errors.push(`Pages fetch: ${err.message}`);
-  }
-
-  // Sync files
-  try {
-    const files = await canvasApi.getFiles(userId, canvasBaseUrl, canvasCourseId);
-    for (const file of files) {
-      try {
-        await syncFile(userId, course.id, canvasBaseUrl, file);
-        results.files++;
-      } catch (err) {
-        results.errors.push(`File "${file.display_name}": ${err.message}`);
-      }
-    }
-  } catch (err) {
-    results.errors.push(`Files fetch: ${err.message}`);
   }
 
   // Update last synced timestamp
@@ -106,158 +86,125 @@ async function syncCourseContent(userId, canvasCourseId, canvasBaseUrl) {
   return results;
 }
 
-// ─── Sync Individual Page ─────────────────────────────────────────────────
+// ─── Sync a single module → one Document ─────────────────────────────────
 
-async function syncPage(userId, courseDbId, canvasBaseUrl, canvasCourseId, pageSummary) {
-  // Fetch full page content
-  const page = await canvasApi.getPage(
-    userId,
-    canvasBaseUrl,
-    canvasCourseId,
-    pageSummary.url
-  );
+async function syncSingleModule(userId, course, canvasBaseUrl, canvasCourseId, moduleId) {
+  // Fetch module items
+  const items = await canvasApi.getModuleItems(userId, canvasBaseUrl, canvasCourseId, moduleId);
 
-  const htmlContent = page.body || "";
-  const textContent = stripHtml(htmlContent);
-
-  // Skip empty pages
-  if (!textContent || textContent.length < 50) return;
-
-  // Upsert content item
-  const contentItem = await prisma.canvasContentItem.upsert({
-    where: {
-      canvasCourseId_canvasItemId_itemType: {
-        canvasCourseId: courseDbId,
-        canvasItemId: String(page.page_id),
-        itemType: "page",
-      },
-    },
-    create: {
-      canvasCourseId: courseDbId,
-      canvasItemId: String(page.page_id),
-      itemType: "page",
-      title: page.title,
-      contentUrl: page.html_url,
-      htmlContent,
-      textContent,
-      lastModifiedAt: page.updated_at ? new Date(page.updated_at) : null,
-    },
-    update: {
-      title: page.title,
-      htmlContent,
-      textContent,
-      lastModifiedAt: page.updated_at ? new Date(page.updated_at) : null,
-    },
-  });
-
-  // If not yet processed into a Document, create one and process it
-  if (!contentItem.documentId) {
-    await processContentItemAsDocument(userId, contentItem, textContent);
-  }
-}
-
-// ─── Sync Individual File ─────────────────────────────────────────────────
-
-async function syncFile(userId, courseDbId, canvasBaseUrl, fileMeta) {
-  // Only process text-extractable files
-  const supportedTypes = [
-    "application/pdf",
-    "text/plain",
-    "text/html",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ];
-
-  if (!supportedTypes.includes(fileMeta.content_type)) return;
-
-  // Upsert content item
-  const contentItem = await prisma.canvasContentItem.upsert({
-    where: {
-      canvasCourseId_canvasItemId_itemType: {
-        canvasCourseId: courseDbId,
-        canvasItemId: String(fileMeta.id),
-        itemType: "file",
-      },
-    },
-    create: {
-      canvasCourseId: courseDbId,
-      canvasItemId: String(fileMeta.id),
-      itemType: "file",
-      title: fileMeta.display_name,
-      contentUrl: fileMeta.url,
-      fileSize: fileMeta.size,
-      lastModifiedAt: fileMeta.modified_at ? new Date(fileMeta.modified_at) : null,
-    },
-    update: {
-      title: fileMeta.display_name,
-      contentUrl: fileMeta.url,
-      fileSize: fileMeta.size,
-      lastModifiedAt: fileMeta.modified_at ? new Date(fileMeta.modified_at) : null,
-    },
-  });
-
-  // If not yet processed into a Document, create one and send to AI
-  if (!contentItem.documentId) {
-    await processFileAsDocument(userId, contentItem, canvasBaseUrl, fileMeta);
-  }
-}
-
-// ─── Process page content through AI pipeline ─────────────────────────────
-
-async function processContentItemAsDocument(userId, contentItem, textContent) {
-  // Create a SOCRA Document record
-  const document = await prisma.document.create({
-    data: {
-      userId,
-      fileName: `[Canvas] ${contentItem.title}`,
-      fileSize: Buffer.byteLength(textContent, "utf8"),
-      mimeType: "text/html",
-      storageKey: `canvas/${contentItem.id}`,
-      processingStatus: "PROCESSING",
-    },
-  });
-
-  // Link the content item to the document
-  await prisma.canvasContentItem.update({
-    where: { id: contentItem.id },
-    data: { documentId: document.id },
-  });
-
-  // Process asynchronously through AI service
-  processTextContentAsync(document.id, textContent, contentItem.title);
-}
-
-async function processFileAsDocument(userId, contentItem, canvasBaseUrl, fileMeta) {
-  const document = await prisma.document.create({
-    data: {
-      userId,
-      fileName: `[Canvas] ${fileMeta.display_name}`,
-      fileSize: fileMeta.size || 0,
-      mimeType: fileMeta.content_type,
-      storageKey: `canvas/${contentItem.id}`,
-      processingStatus: "PROCESSING",
-    },
-  });
-
-  // Link the content item to the document
-  await prisma.canvasContentItem.update({
-    where: { id: contentItem.id },
-    data: { documentId: document.id },
-  });
-
-  // Process via AI service using the Canvas file URL
-  processFileContentAsync(document.id, fileMeta.url, fileMeta.display_name);
-}
-
-// ─── Async AI Processing ──────────────────────────────────────────────────
-
-async function processTextContentAsync(documentId, textContent, title) {
+  // Fetch module name
+  let moduleName = `Module ${moduleId}`;
   try {
+    const modules = await canvasApi.getModules(userId, canvasBaseUrl, canvasCourseId);
+    const mod = modules.find((m) => String(m.id) === String(moduleId));
+    if (mod) moduleName = mod.name;
+  } catch (err) {
+    // Use default name
+  }
+
+  // Collect text from all pages in this module
+  const sections = [];
+
+  for (const item of items) {
+    if (item.type === "Page") {
+      try {
+        const page = await canvasApi.getPage(userId, canvasBaseUrl, canvasCourseId, item.page_url);
+        const text = stripHtml(page.body || "");
+        if (text && text.length > 30) {
+          sections.push({ title: page.title, text });
+        }
+      } catch (err) {
+        logger.error(`Failed to fetch page ${item.page_url}: ${err.message}`);
+      }
+    } else if (item.type === "File") {
+      // For files, we note them but skip download for now (file content goes through file URL)
+      sections.push({ title: item.title, text: `[File: ${item.title}]` });
+    } else if (item.type === "ExternalUrl" || item.type === "ExternalTool") {
+      // Skip external links
+    } else if (item.type === "SubHeader") {
+      sections.push({ title: item.title, text: "" });
+    }
+  }
+
+  if (sections.length === 0) {
+    throw createAppError("Module has no readable content", 400);
+  }
+
+  // Combine all page text into one document
+  const combinedText = sections
+    .filter((s) => s.text && s.text.length > 30)
+    .map((s) => `## ${s.title}\n\n${s.text}`)
+    .join("\n\n---\n\n");
+
+  if (!combinedText || combinedText.length < 100) {
+    throw createAppError("Module content too short to process", 400);
+  }
+
+  // Check if we already have a document for this module
+  const existingItem = await prisma.canvasContentItem.findUnique({
+    where: {
+      canvasCourseId_canvasItemId_itemType: {
+        canvasCourseId: course.id,
+        canvasItemId: String(moduleId),
+        itemType: "module",
+      },
+    },
+  });
+
+  if (existingItem && existingItem.documentId) {
+    // Already synced — update content and re-process
+    await prisma.canvasContentItem.update({
+      where: { id: existingItem.id },
+      data: { textContent: combinedText, title: moduleName },
+    });
+    await prisma.document.update({
+      where: { id: existingItem.documentId },
+      data: { processingStatus: "PROCESSING", processingError: null, summary: null },
+    });
+    // Delete old knowledge units to regenerate
+    await prisma.knowledgeUnit.deleteMany({ where: { documentId: existingItem.documentId } });
+    processModuleAsync(existingItem.documentId, combinedText, moduleName);
+    return;
+  }
+
+  // Create new Document
+  const document = await prisma.document.create({
+    data: {
+      userId,
+      fileName: `[Canvas] ${moduleName}`,
+      fileSize: Buffer.byteLength(combinedText, "utf8"),
+      mimeType: "text/plain",
+      storageKey: `canvas/module/${moduleId}`,
+      processingStatus: "PROCESSING",
+    },
+  });
+
+  // Create content item linked to the document
+  await prisma.canvasContentItem.create({
+    data: {
+      canvasCourseId: course.id,
+      canvasItemId: String(moduleId),
+      itemType: "module",
+      title: moduleName,
+      textContent: combinedText,
+      documentId: document.id,
+    },
+  });
+
+  // Process through AI (knowledge units + summary)
+  processModuleAsync(document.id, combinedText, moduleName);
+}
+
+// ─── AI Processing (knowledge units + summary) ───────────────────────────
+
+async function processModuleAsync(documentId, textContent, title) {
+  try {
+    // 1. Extract knowledge units
     const result = await aiService.processDocument({
       fileUrl: null,
       fileName: title,
       documentId,
-      textContent, // Pass text directly for pages
+      textContent,
     });
 
     if (result.knowledgeUnits && result.knowledgeUnits.length > 0) {
@@ -272,47 +219,18 @@ async function processTextContentAsync(documentId, textContent, title) {
       });
     }
 
+    // 2. Generate study summary
+    const summary = await aiService.generateSummary({
+      textContent,
+      title,
+    });
+
     await prisma.document.update({
       where: { id: documentId },
-      data: { processingStatus: "READY" },
+      data: { processingStatus: "READY", summary },
     });
   } catch (err) {
-    logger.error(`Canvas content processing failed for doc ${documentId}`, {
-      error: err.message,
-    });
-    await prisma.document.update({
-      where: { id: documentId },
-      data: { processingStatus: "ERROR", processingError: err.message },
-    });
-  }
-}
-
-async function processFileContentAsync(documentId, fileUrl, fileName) {
-  try {
-    const result = await aiService.processDocument({
-      fileUrl,
-      fileName,
-      documentId,
-    });
-
-    if (result.knowledgeUnits && result.knowledgeUnits.length > 0) {
-      await prisma.knowledgeUnit.createMany({
-        data: result.knowledgeUnits.map((ku) => ({
-          documentId,
-          topic: ku.topic,
-          concept: ku.concept,
-          sourceExcerpt: ku.sourceExcerpt,
-          bloomLevel: ku.bloomLevel || "REMEMBER",
-        })),
-      });
-    }
-
-    await prisma.document.update({
-      where: { id: documentId },
-      data: { processingStatus: "READY" },
-    });
-  } catch (err) {
-    logger.error(`Canvas file processing failed for doc ${documentId}`, {
+    logger.error(`Module processing failed for doc ${documentId}`, {
       error: err.message,
     });
     await prisma.document.update({
@@ -331,12 +249,12 @@ async function getSyncStatus(userId, canvasCourseId, canvasBaseUrl) {
     },
     include: {
       contentItems: {
+        where: { itemType: "module" },
         select: {
           id: true,
-          itemType: true,
           title: true,
+          canvasItemId: true,
           documentId: true,
-          lastModifiedAt: true,
           updatedAt: true,
         },
       },
@@ -351,13 +269,17 @@ async function getSyncStatus(userId, canvasCourseId, canvasBaseUrl) {
     courseId: course.id,
     courseName: course.courseName,
     lastSyncedAt: course.lastSyncedAt,
-    contentItems: course.contentItems.length,
-    processed: course.contentItems.filter((i) => i.documentId).length,
-    pending: course.contentItems.filter((i) => !i.documentId).length,
+    modules: course.contentItems.map((item) => ({
+      moduleId: item.canvasItemId,
+      title: item.title,
+      documentId: item.documentId,
+      synced: !!item.documentId,
+    })),
   };
 }
 
 module.exports = {
-  syncCourseContent,
+  getModules,
+  syncModules,
   getSyncStatus,
 };

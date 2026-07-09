@@ -13,7 +13,8 @@ router.delete("/token", authenticate, canvasController.removeToken);
 
 // ─── Canvas Data ──────────────────────────────────────────────────────────
 router.get("/courses", authenticate, canvasController.getCourses);
-router.post("/sync", authenticate, canvasController.syncCourse);
+router.get("/modules", authenticate, canvasController.getModules);
+router.post("/sync", authenticate, canvasController.syncModules);
 router.get("/sync/status", authenticate, canvasController.getSyncStatus);
 
 module.exports = router;

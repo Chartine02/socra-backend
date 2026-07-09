@@ -33,12 +33,19 @@ async function generateFlashcards({ documentId, userId }) {
       knowledgeUnits: unitsNeedingCards,
     });
 
+    const validKuIds = new Set(document.knowledgeUnits.map((ku) => ku.id));
+    const fallbackKuId = document.knowledgeUnits[0]?.id;
+
     for (const card of generated) {
+      const knowledgeUnitId = validKuIds.has(card.knowledgeUnitId)
+        ? card.knowledgeUnitId
+        : fallbackKuId;
+      if (!knowledgeUnitId) continue;
       await prisma.flashcard.create({
         data: {
           userId,
           documentId,
-          knowledgeUnitId: card.knowledgeUnitId,
+          knowledgeUnitId,
           front: card.front,
           back: card.back,
           sourceExcerpt: card.sourceExcerpt,

@@ -92,6 +92,7 @@ model Document {
   fileSize         Int
   mimeType         String
   storageKey       String
+  summary          String?           // AI-generated study notes/summary
   processingStatus ProcessingStatus  @default(PROCESSING)
   processingError  String?
   overallMastery   Float             @default(0)

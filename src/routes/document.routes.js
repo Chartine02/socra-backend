@@ -11,5 +11,6 @@ router.post("/", upload.single("file"), documentController.upload);
 router.get("/", documentController.getAll);
 router.get("/:documentId", documentController.getOne);
 router.delete("/:documentId", documentController.remove);
+router.post("/:documentId/reprocess", documentController.reprocess);
 
 module.exports = router;

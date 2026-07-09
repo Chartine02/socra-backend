@@ -157,7 +157,7 @@ Knowledge Units:
 {units_text}
 
 For each question, provide:
-- knowledgeUnitId: the ID of the knowledge unit this question tests
+- knowledgeUnitId: the EXACT ID string from the [ID: ...] tag of the knowledge unit this question tests. You MUST use the original ID exactly as provided (e.g. "clxyz123..."), NOT a sequential number.
 - questionText: a clear, unambiguous question
 - options: exactly 4 answer choices (array of strings)
 - correctIndex: index (0-3) of the correct option
@@ -189,7 +189,7 @@ Knowledge Units:
 {units_text}
 
 For each knowledge unit, create ONE flashcard with:
-- knowledgeUnitId: the ID of the knowledge unit
+- knowledgeUnitId: the EXACT ID string from the [ID: ...] tag of the knowledge unit. You MUST use the original ID exactly as provided (e.g. "clxyz123..."), NOT a sequential number.
 - front: a question, term, or prompt (concise)
 - back: the answer, definition, or explanation (concise but complete)
 - sourceExcerpt: relevant excerpt that supports the answer
@@ -204,3 +204,26 @@ Return ONLY a JSON array of flashcard objects. No other text."""
 
     content = _call_llm(prompt, max_tokens=6000)
     return _parse_json_response(content)
+
+
+def generate_study_summary(text: str, title: str) -> str:
+    prompt = f"""You are an expert study assistant. Create concise, well-structured study notes from the following course module content.
+
+Module: {title}
+
+Content:
+{text[:12000]}
+
+Create study notes that:
+- Start with a brief overview (2-3 sentences)
+- Break the content into clear sections with headings
+- Highlight key definitions, concepts, and relationships
+- Use bullet points for clarity
+- Include important examples or applications mentioned
+- End with 3-5 key takeaways
+
+Format the notes in Markdown. Be thorough but concise — a student should be able to review these notes in 5-10 minutes and understand the module's core content.
+
+Return ONLY the study notes in Markdown format. No meta-commentary."""
+
+    return _call_llm(prompt, max_tokens=4096)

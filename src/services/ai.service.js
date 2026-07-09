@@ -34,12 +34,13 @@ async function callWithRetry(method, url, data, retries = 4) {
   }
 }
 
-async function processDocument({ fileUrl, fileName, documentId }) {
+async function processDocument({ fileUrl, fileName, documentId, textContent }) {
   try {
     const response = await callWithRetry("post", "/process-document", {
       fileUrl,
       fileName,
       documentId,
+      textContent,
     });
     return response.data;
   } catch (err) {
@@ -102,10 +103,25 @@ async function generateFlashcards({ knowledgeUnits }) {
   }
 }
 
+async function generateSummary({ textContent, title }) {
+  try {
+    const response = await callWithRetry("post", "/summarize", {
+      textContent,
+      title,
+    });
+    return response.data.summary;
+  } catch (err) {
+    logger.error("AI service: generateSummary failed", { error: err.message });
+    // Non-critical — return null if summary fails
+    return null;
+  }
+}
+
 module.exports = {
   processDocument,
   startSocraticSession,
   respondSocratic,
   generateQuizQuestions,
   generateFlashcards,
+  generateSummary,
 };
