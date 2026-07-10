@@ -123,6 +123,30 @@ async function getAssignments(userId, canvasBaseUrl, courseId) {
   return canvasRequestPaginated(userId, canvasBaseUrl, `/courses/${courseId}/assignments`);
 }
 
+async function getAssignmentSubmission(userId, canvasBaseUrl, courseId, assignmentId) {
+  return canvasRequest(userId, canvasBaseUrl, `/courses/${courseId}/assignments/${assignmentId}/submissions/self`, {
+    params: { include: ["submission_comments"] },
+  });
+}
+
+// ─── Quiz Endpoints (Classic Quizzes) ─────────────────────────────────────
+
+async function getQuizzes(userId, canvasBaseUrl, courseId) {
+  return canvasRequestPaginated(userId, canvasBaseUrl, `/courses/${courseId}/quizzes`);
+}
+
+async function getQuizSubmissions(userId, canvasBaseUrl, courseId, quizId) {
+  const data = await canvasRequest(userId, canvasBaseUrl, `/courses/${courseId}/quizzes/${quizId}/submissions`);
+  return data.quiz_submissions || [];
+}
+
+async function getQuizSubmissionQuestions(userId, canvasBaseUrl, submissionId, attempt) {
+  const data = await canvasRequest(userId, canvasBaseUrl, `/quiz_submissions/${submissionId}/questions`, {
+    params: { attempt },
+  });
+  return data.quiz_submission_questions || [];
+}
+
 module.exports = {
   getCourses,
   getCourse,
@@ -134,4 +158,8 @@ module.exports = {
   getFile,
   downloadFile,
   getAssignments,
+  getAssignmentSubmission,
+  getQuizzes,
+  getQuizSubmissions,
+  getQuizSubmissionQuestions,
 };

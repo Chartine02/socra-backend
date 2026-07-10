@@ -15,6 +15,13 @@ router.delete("/token", authenticate, canvasController.removeToken);
 router.get("/courses", authenticate, canvasController.getCourses);
 router.get("/modules", authenticate, canvasController.getModules);
 router.post("/sync", authenticate, canvasController.syncModules);
+router.delete("/sync", authenticate, canvasController.unsyncModule);
 router.get("/sync/status", authenticate, canvasController.getSyncStatus);
+
+// ─── Performance Analysis ─────────────────────────────────────────────────
+router.get("/quizzes", authenticate, canvasController.getQuizzes);
+router.get("/quiz-results", authenticate, canvasController.getQuizResults);
+router.get("/assignment-results", authenticate, canvasController.getAssignmentResults);
+router.post("/analyze", authenticate, canvasController.triggerAnalysis);
 
 module.exports = router;

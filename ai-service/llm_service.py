@@ -227,3 +227,69 @@ Format the notes in Markdown. Be thorough but concise — a student should be ab
 Return ONLY the study notes in Markdown format. No meta-commentary."""
 
     return _call_llm(prompt, max_tokens=4096)
+
+
+def analyze_performance(
+    type: str,
+    title: str,
+    score_percent=None,
+    question_results=None,
+    instructor_comments=None,
+    course_context=None,
+) -> dict:
+    """Analyze quiz or assignment performance and generate learning suggestions."""
+
+    if type == "quiz" and question_results:
+        incorrect = [q for q in question_results if not q.get("correct")]
+        correct = [q for q in question_results if q.get("correct")]
+
+        questions_section = "Questions the student got WRONG:\n"
+        for i, q in enumerate(incorrect[:15], 1):
+            questions_section += f"{i}. Q: {q.get('questionText', 'N/A')}\n"
+            questions_section += f"   Student answered: {q.get('studentAnswer', 'N/A')}\n"
+            questions_section += f"   Correct answer: {q.get('correctAnswer', 'N/A')}\n\n"
+
+        questions_section += f"\nQuestions the student got CORRECT: {len(correct)} out of {len(question_results)} total\n"
+        if correct:
+            questions_section += "Topics answered correctly: " + ", ".join(
+                q.get("questionText", "")[:50] for q in correct[:5]
+            ) + "\n"
+    else:
+        questions_section = ""
+
+    comments_section = ""
+    if instructor_comments:
+        comments_section = f"\nInstructor feedback/comments:\n{instructor_comments[:2000]}\n"
+
+    context_section = ""
+    if course_context:
+        context_section = f"\nCourse context:\n{course_context[:3000]}\n"
+
+    score_text = f"Score: {score_percent:.1f}%" if score_percent is not None else "Score: Not available"
+
+    prompt = f"""You are an educational AI assistant analyzing a student's {type} performance to help them improve.
+You are writing DIRECTLY to the student, so use second person ("you", "your") throughout. Never say "the student".
+
+Assessment: {title}
+{score_text}
+
+{questions_section}
+{comments_section}
+{context_section}
+
+Based on this performance data, provide:
+1. A brief summary addressing the student directly about how they did (2-3 sentences, use "you"/"your")
+2. The specific topics/concepts they struggled with (weak topics)
+3. Actionable study suggestions for each weak area, prioritized by importance (address the student as "you")
+4. An encouraging message highlighting what they did well (use "you")
+
+Return ONLY a JSON object with these keys:
+- "summary" (string): Brief performance summary written in second person (e.g. "You scored 65% on...")
+- "weakTopics" (array of strings): Topics to work on
+- "suggestions" (array of objects): Each with "topic" (string), "suggestion" (string - actionable advice using "you"), "priority" (string: "high", "medium", or "low")
+- "encouragement" (string): Positive message using "you"
+
+No other text."""
+
+    content = _call_llm(prompt, max_tokens=2000)
+    return _parse_json_response(content)

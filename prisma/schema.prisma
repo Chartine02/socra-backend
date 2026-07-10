@@ -54,6 +54,14 @@ enum UserRole {
   INSTRUCTOR
 }
 
+enum NotificationType {
+  QUIZ_PERFORMANCE
+  ASSIGNMENT_PERFORMANCE
+  STUDY_SUGGESTION
+  WEEKLY_DIGEST
+  SYSTEM
+}
+
 // ─── MODELS ───────────────────────────────────────────────────────────────
 
 model User {
@@ -69,6 +77,7 @@ model User {
   resetTokenExpiry  DateTime?
   canvasUserId      String?
   canvasCourseId    String?
+  emailNotifications Boolean        @default(true)
   studyStreak       Int             @default(0)
   lastStudiedAt     DateTime?
   createdAt         DateTime        @default(now())
@@ -81,6 +90,9 @@ model User {
   dialogueTurns     DialogueTurn[]
   canvasTokens      CanvasToken[]
   canvasCourses     CanvasCourse[]
+  notifications     Notification[]
+  canvasQuizSubmissions     CanvasQuizSubmission[]
+  canvasAssignmentSubmissions CanvasAssignmentSubmission[]
 
   @@map("users")
 }
@@ -300,6 +312,8 @@ model CanvasCourse {
 
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   contentItems    CanvasContentItem[]
+  quizSubmissions       CanvasQuizSubmission[]
+  assignmentSubmissions CanvasAssignmentSubmission[]
 
   @@unique([userId, canvasCourseId, canvasBaseUrl])
   @@map("canvas_courses")
@@ -325,4 +339,77 @@ model CanvasContentItem {
 
   @@unique([canvasCourseId, canvasItemId, itemType])
   @@map("canvas_content_items")
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────
+
+model Notification {
+  id          String           @id @default(uuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  data        Json?
+  isRead      Boolean          @default(false)
+  emailSent   Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── CANVAS PERFORMANCE TRACKING ──────────────────────────────────────────
+
+model CanvasQuizSubmission {
+  id                  String   @id @default(uuid())
+  userId              String
+  canvasCourseId      String
+  canvasQuizId        String
+  canvasSubmissionId  String
+  quizTitle           String
+  score               Float?
+  pointsPossible      Float?
+  scorePercent        Float?
+  attemptNumber       Int      @default(1)
+  submittedAt         DateTime?
+  questionResults     Json?
+  weakTopics          Json?
+  suggestions         Json?
+  analyzed            Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course              CanvasCourse @relation(fields: [canvasCourseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, canvasQuizId, canvasSubmissionId])
+  @@map("canvas_quiz_submissions")
+}
+
+model CanvasAssignmentSubmission {
+  id                    String   @id @default(uuid())
+  userId                String
+  canvasCourseId        String
+  canvasAssignmentId    String
+  canvasSubmissionId    String
+  assignmentTitle       String
+  score                 Float?
+  pointsPossible        Float?
+  scorePercent          Float?
+  grade                 String?
+  submittedAt           DateTime?
+  gradedAt              DateTime?
+  submissionComments    Json?
+  suggestions           Json?
+  analyzed              Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course                CanvasCourse @relation(fields: [canvasCourseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, canvasAssignmentId, canvasSubmissionId])
+  @@map("canvas_assignment_submissions")
 }

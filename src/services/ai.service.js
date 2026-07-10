@@ -117,6 +117,23 @@ async function generateSummary({ textContent, title }) {
   }
 }
 
+async function analyzePerformance({ type, title, scorePercent, questionResults, instructorComments, courseContext }) {
+  try {
+    const response = await callWithRetry("post", "/analyze-performance", {
+      type,
+      title,
+      scorePercent,
+      questionResults,
+      instructorComments,
+      courseContext,
+    });
+    return response.data;
+  } catch (err) {
+    logger.error("AI service: analyzePerformance failed", { error: err.message });
+    throw createAppError("AI service unavailable", 502);
+  }
+}
+
 module.exports = {
   processDocument,
   startSocraticSession,
@@ -124,4 +141,5 @@ module.exports = {
   generateQuizQuestions,
   generateFlashcards,
   generateSummary,
+  analyzePerformance,
 };

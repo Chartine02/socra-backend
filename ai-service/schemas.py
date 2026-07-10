@@ -82,3 +82,34 @@ class FlashcardOutput(BaseModel):
     front: str
     back: str
     sourceExcerpt: str
+
+
+# ─── Performance Analysis ──────────────────────────────────────────────────
+
+class QuestionResult(BaseModel):
+    questionText: str
+    studentAnswer: Optional[str] = None
+    correctAnswer: Optional[str] = None
+    correct: bool
+
+
+class PerformanceSuggestion(BaseModel):
+    topic: str
+    suggestion: str
+    priority: str  # "high", "medium", "low"
+
+
+class AnalyzePerformanceRequest(BaseModel):
+    type: str  # "quiz" or "assignment"
+    title: str
+    scorePercent: Optional[float] = None
+    questionResults: Optional[list[QuestionResult]] = None
+    instructorComments: Optional[str] = None
+    courseContext: Optional[str] = None
+
+
+class AnalyzePerformanceResponse(BaseModel):
+    summary: str
+    weakTopics: list[str]
+    suggestions: list[PerformanceSuggestion]
+    encouragement: str

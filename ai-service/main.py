@@ -18,6 +18,8 @@ from schemas import (
     QuizQuestionOutput,
     FlashcardGenerateRequest,
     FlashcardOutput,
+    AnalyzePerformanceRequest,
+    AnalyzePerformanceResponse,
 )
 from llm_service import (
     extract_knowledge_units,
@@ -25,6 +27,7 @@ from llm_service import (
     generate_socratic_response,
     generate_quiz_questions,
     generate_flashcards,
+    analyze_performance,
 )
 
 app = FastAPI(title="SOCRA AI Service", version="1.0.0")
@@ -131,6 +134,19 @@ def summarize(req: SummarizeRequest, _=Depends(verify_api_key)):
     from llm_service import generate_study_summary
     summary = generate_study_summary(req.textContent, req.title)
     return {"summary": summary}
+
+
+@app.post("/analyze-performance", response_model=AnalyzePerformanceResponse)
+def analyze_performance_endpoint(req: AnalyzePerformanceRequest, _=Depends(verify_api_key)):
+    result = analyze_performance(
+        type=req.type,
+        title=req.title,
+        score_percent=req.scorePercent,
+        question_results=[qr.model_dump() for qr in req.questionResults] if req.questionResults else None,
+        instructor_comments=req.instructorComments,
+        course_context=req.courseContext,
+    )
+    return result
 
 
 if __name__ == "__main__":

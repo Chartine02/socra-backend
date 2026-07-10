@@ -1,6 +1,7 @@
 require("dotenv").config();
 const axios = require("axios");
 const app = require("./src/app");
+const { startCanvasSyncScheduler } = require("./src/jobs/canvas-sync.job");
 
 const PORT = process.env.PORT || 8000;
 
@@ -20,4 +21,5 @@ function keepAIServiceAlive() {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   keepAIServiceAlive();
+  startCanvasSyncScheduler();
 });

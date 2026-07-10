@@ -5,6 +5,7 @@ const studyRoutes = require("./study.routes");
 const flashcardRoutes = require("./flashcard.routes");
 const analyticsRoutes = require("./analytics.routes");
 const canvasRoutes = require("./canvas.routes");
+const notificationRoutes = require("./notification.routes");
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use("/study", studyRoutes);
 router.use("/flashcards", flashcardRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/canvas", canvasRoutes);
+router.use("/notifications", notificationRoutes);
 
 module.exports = router;

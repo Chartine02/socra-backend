@@ -278,8 +278,43 @@ async function getSyncStatus(userId, canvasCourseId, canvasBaseUrl) {
   };
 }
 
+async function unsyncModule(userId, canvasCourseId, canvasBaseUrl, moduleId) {
+  const course = await prisma.canvasCourse.findUnique({
+    where: {
+      userId_canvasCourseId_canvasBaseUrl: { userId, canvasCourseId, canvasBaseUrl },
+    },
+  });
+
+  if (!course) {
+    throw createAppError("Course not found", 404);
+  }
+
+  const contentItem = await prisma.canvasContentItem.findUnique({
+    where: {
+      canvasCourseId_canvasItemId_itemType: {
+        canvasCourseId: course.id,
+        canvasItemId: String(moduleId),
+        itemType: "module",
+      },
+    },
+  });
+
+  if (!contentItem) {
+    throw createAppError("Module not found", 404);
+  }
+
+  // Delete the linked document (cascades to KnowledgeUnits, StudySessions, etc.)
+  if (contentItem.documentId) {
+    await prisma.document.delete({ where: { id: contentItem.documentId } });
+  }
+
+  // Delete the content item record
+  await prisma.canvasContentItem.delete({ where: { id: contentItem.id } });
+}
+
 module.exports = {
   getModules,
   syncModules,
   getSyncStatus,
+  unsyncModule,
 };

@@ -1,6 +1,7 @@
 const canvasOAuthService = require("../services/canvas-oauth.service");
 const canvasSyncService = require("../services/canvas-sync.service");
 const canvasApiService = require("../services/canvas-api.service");
+const canvasAnalysisService = require("../services/canvas-analysis.service");
 const { success } = require("../utils/response.utils");
 
 const CANVAS_BASE_URL = "https://alueducation.instructure.com";
@@ -121,6 +122,71 @@ async function getSyncStatus(req, res, next) {
   }
 }
 
+// ─── Performance Analysis ─────────────────────────────────────────────────
+
+async function getQuizzes(req, res, next) {
+  try {
+    const { canvasCourseId } = req.query;
+    if (!canvasCourseId) {
+      return res.status(400).json({ error: "canvasCourseId query parameter required" });
+    }
+    const quizzes = await canvasApiService.getQuizzes(req.user.id, CANVAS_BASE_URL, canvasCourseId);
+    return success(res, { quizzes });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getQuizResults(req, res, next) {
+  try {
+    const { canvasCourseId } = req.query;
+    const results = await canvasAnalysisService.getQuizResults(req.user.id, canvasCourseId);
+    return success(res, { results });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getAssignmentResults(req, res, next) {
+  try {
+    const { canvasCourseId } = req.query;
+    const results = await canvasAnalysisService.getAssignmentResults(req.user.id, canvasCourseId);
+    return success(res, { results });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function triggerAnalysis(req, res, next) {
+  try {
+    const results = await canvasAnalysisService.runAnalysisCycle(req.user.id);
+    return success(res, results);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function unsyncModule(req, res, next) {
+  try {
+    const { canvasCourseId, moduleId } = req.body;
+
+    if (!canvasCourseId || !moduleId) {
+      return res.status(400).json({ error: "canvasCourseId and moduleId are required" });
+    }
+
+    await canvasSyncService.unsyncModule(
+      req.user.id,
+      String(canvasCourseId),
+      CANVAS_BASE_URL,
+      String(moduleId)
+    );
+
+    return success(res, { message: "Module unsynced and all related data deleted" });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   storeToken,
   getTokenStatus,
@@ -129,4 +195,9 @@ module.exports = {
   getModules,
   syncModules,
   getSyncStatus,
+  getQuizzes,
+  getQuizResults,
+  getAssignmentResults,
+  triggerAnalysis,
+  unsyncModule,
 };

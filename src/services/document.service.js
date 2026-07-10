@@ -156,6 +156,12 @@ async function deleteDocument(documentId, userId) {
     await supabase.storage.from(BUCKET).remove([document.storageKey]);
   }
 
+  // Clean up Canvas content item reference if this is a synced module
+  await prisma.canvasContentItem.deleteMany({
+    where: { documentId },
+  });
+
+  // Cascade deletes KnowledgeUnits, StudySessions, QuizQuestions, Flashcards, etc.
   await prisma.document.delete({ where: { id: documentId } });
 }
 
