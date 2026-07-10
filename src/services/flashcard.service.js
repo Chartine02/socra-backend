@@ -106,14 +106,43 @@ async function reviewFlashcard({ flashcardId, rating, userId }) {
     },
   });
 
-  // Update parent knowledge unit mastery state
+  // Update parent knowledge unit — aggregate across all flashcards for this KU
+  const allFlashcardsForKu = await prisma.flashcard.findMany({
+    where: { knowledgeUnitId: flashcard.knowledgeUnitId, userId },
+    select: { interval: true, masteryState: true },
+  });
+
+  // Average mastery across all flashcards for this KU
+  let kuMasteryPercentage = 0;
+  if (allFlashcardsForKu.length > 0) {
+    kuMasteryPercentage = allFlashcardsForKu.reduce((sum, fc) => {
+      return sum + Math.min(100, (fc.interval / 21) * 100);
+    }, 0) / allFlashcardsForKu.length;
+  }
+
+  let kuMasteryState = 'FORGOTTEN';
+  if (kuMasteryPercentage >= 80) kuMasteryState = 'MASTERED';
+  else if (kuMasteryPercentage >= 50) kuMasteryState = 'SHAKY';
+
+  // Only update KU if flashcard-derived mastery is higher than existing (quiz may have set it higher)
+  const currentKu = await prisma.knowledgeUnit.findUnique({ where: { id: flashcard.knowledgeUnitId } });
+  const finalPercentage = Math.max(currentKu.masteryPercentage, kuMasteryPercentage);
+  let finalState = 'FORGOTTEN';
+  if (finalPercentage >= 80) finalState = 'MASTERED';
+  else if (finalPercentage >= 50) finalState = 'SHAKY';
+
   await prisma.knowledgeUnit.update({
     where: { id: flashcard.knowledgeUnitId },
     data: {
-      masteryState: sm2Result.masteryState,
+      masteryPercentage: Math.round(finalPercentage * 10) / 10,
+      masteryState: finalState,
       lastReviewedAt: new Date(),
     },
   });
+
+  // Recalculate document-level mastery
+  const { recalculateDocumentMastery } = require('./study.service');
+  await recalculateDocumentMastery(flashcard.documentId);
 
   return updated;
 }

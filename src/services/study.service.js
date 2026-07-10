@@ -126,6 +126,37 @@ async function respondSocratic({ sessionId, content, currentBloomLevel, userId }
     },
   });
 
+  // Update mastery based on Bloom's level progression
+  const session = await prisma.studySession.findUnique({ where: { id: sessionId } });
+  if (result.bloomLevel) {
+    const bloomIndex = ['REMEMBER', 'UNDERSTAND', 'APPLY', 'ANALYSE', 'EVALUATE', 'CREATE'].indexOf(result.bloomLevel);
+    const bloomMastery = bloomIndex >= 0 ? ((bloomIndex + 1) / 6) * 100 : 0;
+
+    // Get all KUs for this document and update the ones matching the session
+    const document = await prisma.document.findUnique({
+      where: { id: session.documentId },
+      include: { knowledgeUnits: true },
+    });
+
+    if (document && document.knowledgeUnits.length > 0) {
+      for (const ku of document.knowledgeUnits) {
+        const newMastery = Math.max(ku.masteryPercentage, bloomMastery);
+        let newState = 'FORGOTTEN';
+        if (newMastery >= 80) newState = 'MASTERED';
+        else if (newMastery >= 50) newState = 'SHAKY';
+
+        if (newMastery > ku.masteryPercentage) {
+          await prisma.knowledgeUnit.update({
+            where: { id: ku.id },
+            data: { masteryPercentage: newMastery, masteryState: newState, lastReviewedAt: new Date() },
+          });
+        }
+      }
+
+      await recalculateDocumentMastery(session.documentId);
+    }
+  }
+
   await prisma.studySession.update({
     where: { id: sessionId },
     data: { itemsCompleted: { increment: 1 } },
@@ -245,6 +276,9 @@ async function respondQuiz({ sessionId, questionId, selectedIndex, confidenceRat
     data: { masteryPercentage, masteryState, lastReviewedAt: new Date() },
   });
 
+  // Recalculate document-level mastery
+  await recalculateDocumentMastery(question.documentId);
+
   await prisma.studySession.update({
     where: { id: sessionId },
     data: { itemsCompleted: { increment: 1 } },
@@ -258,6 +292,24 @@ async function respondQuiz({ sessionId, questionId, selectedIndex, confidenceRat
   };
 }
 
+// ─── Shared Helper: Recalculate Document Mastery ─────────────────────────
+
+async function recalculateDocumentMastery(documentId) {
+  const kus = await prisma.knowledgeUnit.findMany({
+    where: { documentId },
+    select: { masteryPercentage: true },
+  });
+
+  if (kus.length === 0) return;
+
+  const avg = kus.reduce((sum, ku) => sum + ku.masteryPercentage, 0) / kus.length;
+
+  await prisma.document.update({
+    where: { id: documentId },
+    data: { overallMastery: Math.round(avg * 10) / 10 },
+  });
+}
+
 module.exports = {
   createSession,
   updateSession,
@@ -265,4 +317,5 @@ module.exports = {
   respondSocratic,
   generateQuiz,
   respondQuiz,
+  recalculateDocumentMastery,
 };

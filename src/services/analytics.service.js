@@ -35,6 +35,69 @@ async function getKnowledgeGap({ userId, documentId }) {
     }
   }
 
+  // Incorporate Canvas quiz/assignment weak topics
+  const canvasQuizSubs = await prisma.canvasQuizSubmission.findMany({
+    where: { userId, analyzed: true },
+    select: { weakTopics: true, scorePercent: true },
+  });
+
+  const canvasAssignmentSubs = await prisma.canvasAssignmentSubmission.findMany({
+    where: { userId, analyzed: true },
+    select: { suggestions: true, scorePercent: true },
+  });
+
+  // Collect weak topics from Canvas with their associated scores
+  const canvasWeakTopics = {};
+
+  for (const sub of canvasQuizSubs) {
+    const weakTopics = sub.weakTopics;
+    if (Array.isArray(weakTopics)) {
+      for (const topic of weakTopics) {
+        if (!canvasWeakTopics[topic]) {
+          canvasWeakTopics[topic] = { totalScore: 0, count: 0 };
+        }
+        canvasWeakTopics[topic].totalScore += (sub.scorePercent ?? 0);
+        canvasWeakTopics[topic].count += 1;
+      }
+    }
+  }
+
+  for (const sub of canvasAssignmentSubs) {
+    const suggestions = sub.suggestions;
+    if (Array.isArray(suggestions)) {
+      for (const s of suggestions) {
+        const topic = s.topic;
+        if (!topic) continue;
+        if (!canvasWeakTopics[topic]) {
+          canvasWeakTopics[topic] = { totalScore: 0, count: 0 };
+        }
+        canvasWeakTopics[topic].totalScore += (sub.scorePercent ?? 0);
+        canvasWeakTopics[topic].count += 1;
+      }
+    }
+  }
+
+  // Merge Canvas weak topics into the topic map
+  for (const [topic, data] of Object.entries(canvasWeakTopics)) {
+    const avgCanvasScore = data.count > 0 ? data.totalScore / data.count : 0;
+
+    if (topicMap[topic]) {
+      // Blend Canvas score with KU mastery (Canvas counts as additional data points)
+      topicMap[topic].totalPercentage += avgCanvasScore;
+      topicMap[topic].count += 1;
+    } else {
+      // Canvas-only topic not in KU data — add it as a new gap
+      topicMap[topic] = {
+        topic,
+        totalPercentage: avgCanvasScore,
+        count: 1,
+        lastReviewedAt: null,
+        states: [avgCanvasScore >= 80 ? "MASTERED" : avgCanvasScore >= 50 ? "SHAKY" : "FORGOTTEN"],
+        source: "canvas",
+      };
+    }
+  }
+
   const topics = Object.values(topicMap).map((t) => {
     const masteryPercentage = t.count > 0 ? t.totalPercentage / t.count : 0;
     // Determine overall mastery state for topic
@@ -48,6 +111,7 @@ async function getKnowledgeGap({ userId, documentId }) {
       masteryPercentage: Math.round(masteryPercentage * 10) / 10,
       knowledgeUnitCount: t.count,
       lastReviewedAt: t.lastReviewedAt,
+      source: t.source || "study",
     };
   });
 

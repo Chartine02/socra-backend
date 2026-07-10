@@ -3,6 +3,7 @@ const { supabase, BUCKET } = require("../lib/supabase");
 const aiService = require("./ai.service");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const logger = require("../utils/logger");
 
 function createAppError(message, statusCode) {
   const err = new Error(message);
@@ -70,6 +71,11 @@ async function processDocumentAsync(documentId, storageKey, fileName) {
         })),
       });
 
+      // Fetch created KUs with IDs for content generation
+      const createdKUs = await prisma.knowledgeUnit.findMany({
+        where: { documentId },
+      });
+
       // Generate study summary from the knowledge units' source excerpts
       const textForSummary = result.knowledgeUnits
         .map((ku) => `## ${ku.topic}: ${ku.concept}\n\n${ku.sourceExcerpt}`)
@@ -83,6 +89,11 @@ async function processDocumentAsync(documentId, storageKey, fileName) {
       await prisma.document.update({
         where: { id: documentId },
         data: { processingStatus: "READY", summary },
+      });
+
+      // Pre-generate study materials in the background
+      preGenerateStudyMaterials(documentId, createdKUs).catch((err) => {
+        logger.error(`Pre-generation failed for doc ${documentId}`, { error: err.message });
       });
     } else {
       await prisma.document.update({
@@ -230,4 +241,103 @@ async function processDocumentWithText(documentId, textContent, fileName) {
   }
 }
 
-module.exports = { uploadDocument, getUserDocuments, getDocumentById, deleteDocument, reprocessDocument };
+// ─── Pre-generate Study Materials ─────────────────────────────────────────
+
+async function preGenerateStudyMaterials(documentId, knowledgeUnits) {
+  if (!knowledgeUnits || knowledgeUnits.length === 0) return;
+
+  const kuInputs = knowledgeUnits.map((ku) => ({
+    id: ku.id,
+    topic: ku.topic,
+    concept: ku.concept,
+    sourceExcerpt: ku.sourceExcerpt,
+    bloomLevel: ku.bloomLevel || "REMEMBER",
+  }));
+
+  // Get the document to find the userId
+  const document = await prisma.document.findUnique({
+    where: { id: documentId },
+    select: { userId: true },
+  });
+  if (!document) return;
+
+  // Run quiz, flashcard, and socratic generation in parallel
+  const results = await Promise.allSettled([
+    // 1. Pre-generate quiz questions (10 questions)
+    (async () => {
+      const questions = await aiService.generateQuizQuestions({
+        documentId,
+        knowledgeUnits: kuInputs,
+        count: 10,
+      });
+
+      const validKuIds = new Set(knowledgeUnits.map((ku) => ku.id));
+      const fallbackKuId = knowledgeUnits[0]?.id;
+
+      for (const q of questions) {
+        const knowledgeUnitId = validKuIds.has(q.knowledgeUnitId)
+          ? q.knowledgeUnitId
+          : fallbackKuId;
+        if (!knowledgeUnitId) continue;
+        await prisma.quizQuestion.create({
+          data: {
+            documentId,
+            knowledgeUnitId,
+            questionText: q.questionText,
+            options: q.options,
+            correctIndex: q.correctIndex,
+            bloomLevel: q.bloomLevel || "REMEMBER",
+            explanation: q.explanation,
+            sourceExcerpt: q.sourceExcerpt,
+          },
+        });
+      }
+      logger.info(`Pre-generated ${questions.length} quiz questions for doc ${documentId}`);
+    })(),
+
+    // 2. Pre-generate flashcards
+    (async () => {
+      const cards = await aiService.generateFlashcards({
+        knowledgeUnits: kuInputs,
+      });
+
+      const validKuIds = new Set(knowledgeUnits.map((ku) => ku.id));
+      const fallbackKuId = knowledgeUnits[0]?.id;
+
+      for (const card of cards) {
+        const knowledgeUnitId = validKuIds.has(card.knowledgeUnitId)
+          ? card.knowledgeUnitId
+          : fallbackKuId;
+        if (!knowledgeUnitId) continue;
+        await prisma.flashcard.create({
+          data: {
+            userId: document.userId,
+            documentId,
+            knowledgeUnitId,
+            front: card.front,
+            back: card.back,
+            sourceExcerpt: card.sourceExcerpt,
+          },
+        });
+      }
+      logger.info(`Pre-generated ${cards.length} flashcards for doc ${documentId}`);
+    })(),
+
+    // 3. Pre-generate initial Socratic question (warm the LLM cache)
+    (async () => {
+      await aiService.startSocraticSession({
+        documentId,
+        knowledgeUnits: kuInputs,
+      });
+      logger.info(`Pre-generated Socratic question for doc ${documentId}`);
+    })(),
+  ]);
+
+  for (const r of results) {
+    if (r.status === "rejected") {
+      logger.error(`Pre-generation step failed for doc ${documentId}`, { error: r.reason?.message });
+    }
+  }
+}
+
+module.exports = { uploadDocument, getUserDocuments, getDocumentById, deleteDocument, reprocessDocument, preGenerateStudyMaterials };

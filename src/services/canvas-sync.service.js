@@ -229,6 +229,18 @@ async function processModuleAsync(documentId, textContent, title) {
       where: { id: documentId },
       data: { processingStatus: "READY", summary },
     });
+
+    // 3. Pre-generate study materials (quiz, flashcards)
+    if (result.knowledgeUnits && result.knowledgeUnits.length > 0) {
+      const createdKUs = await prisma.knowledgeUnit.findMany({
+        where: { documentId },
+      });
+
+      const { preGenerateStudyMaterials } = require("./document.service");
+      preGenerateStudyMaterials(documentId, createdKUs).catch((err) => {
+        logger.error(`Pre-generation failed for Canvas doc ${documentId}`, { error: err.message });
+      });
+    }
   } catch (err) {
     logger.error(`Module processing failed for doc ${documentId}`, {
       error: err.message,

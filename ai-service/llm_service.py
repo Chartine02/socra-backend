@@ -88,7 +88,7 @@ def generate_socratic_question(knowledge_units: list[dict], bloom_level: str = "
     topics = ", ".join(set(ku.get("topic", "") for ku in knowledge_units[:5]))
     excerpts = "\n".join(ku.get("sourceExcerpt", "")[:200] for ku in knowledge_units[:5])
 
-    prompt = f"""You are a Socratic tutor. Generate ONE thought-provoking question at the {bloom_level} level of Bloom's taxonomy.
+    prompt = f"""You are a Socratic tutor. Generate exactly ONE single thought-provoking question at the {bloom_level} level of Bloom's taxonomy.
 
 Topics covered: {topics}
 
@@ -96,12 +96,14 @@ Source material:
 {excerpts}
 
 The question should:
+- Be EXACTLY ONE question, not multiple
 - Be at the {bloom_level} level of Bloom's taxonomy
 - Encourage the student to think deeply
 - Be answerable from the source material
 - Not be a simple yes/no question
+- Do NOT include multiple questions separated by "and" or follow-up questions
 
-Return ONLY a JSON object with keys: "question" (string), "bloomLevel" (string: {bloom_level})
+Return ONLY a JSON object with keys: "question" (string - a single question only), "bloomLevel" (string: {bloom_level})
 No other text."""
 
     content = _call_llm(prompt, max_tokens=500)
