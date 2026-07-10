@@ -8,7 +8,6 @@ function createAppError(message, statusCode) {
 }
 
 async function createSession({ userId, documentId, mode }) {
-  // Verify document belongs to user
   const document = await prisma.document.findFirst({
     where: { id: documentId, userId },
   });
@@ -64,7 +63,6 @@ async function updateSession(sessionId, userId, data) {
   });
 }
 
-// ─── SOCRATIC MODE ────────────────────────────────────────────────────────
 
 async function startSocratic({ sessionId, documentId, userId }) {
   const document = await prisma.document.findFirst({
@@ -80,7 +78,6 @@ async function startSocratic({ sessionId, documentId, userId }) {
     knowledgeUnits: document.knowledgeUnits,
   });
 
-  // Save AI turn
   await prisma.dialogueTurn.create({
     data: {
       userId,
@@ -95,7 +92,6 @@ async function startSocratic({ sessionId, documentId, userId }) {
 }
 
 async function respondSocratic({ sessionId, content, currentBloomLevel, userId }) {
-  // Save student turn
   await prisma.dialogueTurn.create({
     data: {
       userId,
@@ -106,7 +102,6 @@ async function respondSocratic({ sessionId, content, currentBloomLevel, userId }
     },
   });
 
-  // Get conversation history
   const history = await prisma.dialogueTurn.findMany({
     where: { sessionId },
     orderBy: { createdAt: "asc" },
@@ -131,7 +126,6 @@ async function respondSocratic({ sessionId, content, currentBloomLevel, userId }
     },
   });
 
-  // Update session items count
   await prisma.studySession.update({
     where: { id: sessionId },
     data: { itemsCompleted: { increment: 1 } },
@@ -140,7 +134,6 @@ async function respondSocratic({ sessionId, content, currentBloomLevel, userId }
   return result;
 }
 
-// ─── QUIZ MODE ────────────────────────────────────────────────────────────
 
 async function generateQuiz({ sessionId, documentId, count, userId }) {
   const document = await prisma.document.findFirst({
@@ -151,16 +144,36 @@ async function generateQuiz({ sessionId, documentId, count, userId }) {
     throw createAppError("Document not found", 404);
   }
 
+  const existingQuestions = await prisma.quizQuestion.findMany({
+    where: { documentId },
+    include: {
+      responses: { where: { userId } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const unanswered = existingQuestions.filter((q) => q.responses.length === 0);
+
+  if (unanswered.length >= count) {
+    return unanswered.slice(0, count).map((q) => ({
+      id: q.id,
+      questionText: q.questionText,
+      options: q.options,
+      bloomLevel: q.bloomLevel,
+    }));
+  }
+
+  const needed = count - unanswered.length;
+
   const result = await aiService.generateQuizQuestions({
     documentId,
     knowledgeUnits: document.knowledgeUnits,
-    count,
+    count: needed,
   });
 
-  // Save quiz questions
   const validKuIds = new Set(document.knowledgeUnits.map((ku) => ku.id));
   const fallbackKuId = document.knowledgeUnits[0]?.id;
-  const questions = [];
+  const newQuestions = [];
   for (const q of result) {
     const knowledgeUnitId = validKuIds.has(q.knowledgeUnitId)
       ? q.knowledgeUnitId
@@ -178,11 +191,12 @@ async function generateQuiz({ sessionId, documentId, count, userId }) {
         sourceExcerpt: q.sourceExcerpt,
       },
     });
-    questions.push(question);
+    newQuestions.push(question);
   }
 
-  // Return questions without correctIndex for the client
-  return questions.map((q) => ({
+  const allQuestions = [...unanswered, ...newQuestions];
+
+  return allQuestions.slice(0, count).map((q) => ({
     id: q.id,
     questionText: q.questionText,
     options: q.options,
@@ -212,7 +226,6 @@ async function respondQuiz({ sessionId, questionId, selectedIndex, confidenceRat
     },
   });
 
-  // Update knowledge unit mastery based on running accuracy
   const allResponses = await prisma.quizResponse.findMany({
     where: {
       userId,
@@ -232,7 +245,6 @@ async function respondQuiz({ sessionId, questionId, selectedIndex, confidenceRat
     data: { masteryPercentage, masteryState, lastReviewedAt: new Date() },
   });
 
-  // Update session items count
   await prisma.studySession.update({
     where: { id: sessionId },
     data: { itemsCompleted: { increment: 1 } },
