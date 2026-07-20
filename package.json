@@ -8,7 +8,12 @@
     "dev": "nodemon server.js",
     "migrate": "prisma migrate dev",
     "generate": "prisma generate",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:unit": "jest --forceExit tests/unit",
+    "test:integration": "jest --forceExit tests/integration",
+    "test:coverage": "jest --forceExit --coverage",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -29,7 +34,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "jest": "^30.4.2",
     "nodemon": "^3.1.14",
-    "prisma": "^6.19.3"
+    "prisma": "^6.19.3",
+    "supertest": "^7.2.2"
   }
 }
